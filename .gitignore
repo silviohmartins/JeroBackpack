@@ -38,7 +38,7 @@ bld/
 *.nuget.props
 *.nuget.targets
 packages/
-# Excluir pacotes do cache local (geralmente não é necessário, mas é uma boa prática)
+# Excluir pacotes do cache local
 *.nuget.cache
 
 # Resharper cache
