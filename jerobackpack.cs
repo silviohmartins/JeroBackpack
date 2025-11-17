@@ -1,111 +1,167 @@
 ﻿using SPTarkov.DI.Annotations;
 using SPTarkov.Server.Core.DI;
 using SPTarkov.Server.Core.Helpers;
-using SPTarkov.Server.Core.Models.Spt.Mod;
 using SPTarkov.Server.Core.Models.Utils;
 using SPTarkov.Server.Core.Servers;
 using System.Reflection;
 
-namespace _jerobackpack;
+namespace JeroBackpack;
 
-public record ModMetadata : AbstractModMetadata
-{
-    public override string ModGuid { get; init; } = "com.jero.jerobackpack";
-    public override string Name { get; init; } = "jerobackpack";
-    public override string Author { get; init; } = "jero";
-    public override List<string>? Contributors { get; init; }
-    public override SemanticVersioning.Version Version { get; init; } = new("2.0.0");
-    public override SemanticVersioning.Range SptVersion { get; init; } = new("~4.0.0");
-    public override List<string>? Incompatibilities { get; init; }
-    public override Dictionary<string, SemanticVersioning.Range>? ModDependencies { get; init; }
-    public override string? Url { get; init; }
-    public override bool? IsBundleMod { get; init; }
-    public override string? License { get; init; } = "MIT";
-}
-
-public class ModConfig
-{
-    public Dictionary<string, GridSize> Backpacks { get; set; } = new();
-}
-
-//public record GridSize(int Horizontal, int Vertical);
-
-public class GridSize
-{
-    // This property is for user reference in the config file.
-    // Our mod's logic will not use it.
-    public string ItemName { get; set; }
-
-    public int Horizontal { get; set; }
-    public int Vertical { get; set; }
-}
-
-[Injectable(TypePriority = OnLoadOrder.PostDBModLoader + 1)]
-public class CustomItemServiceExample(
-    ISptLogger<CustomItemServiceExample> logger,
+[Injectable(TypePriority = OnLoadOrder.PostDBModLoader + 10)]
+public class JeroBackpack(
+    ISptLogger<JeroBackpack> logger,
     DatabaseServer databaseServer,
     ModHelper modHelper
-    )
-    : IOnLoad
+) : IOnLoad
 {
-    private ModConfig _config;
+    private const string BACKPACK_PARENT_ID = "5448e53e4bdc2d60728b4567";
+    
+    private ModConfig? _sizeMappingConfig;
+    private ItemCustomConfig? _itemCustomConfig;
+    private BlacklistConfig? _blacklistConfig;
 
     public Task OnLoad()
     {
+        var modPath = modHelper.GetAbsolutePathToModFolder(Assembly.GetExecutingAssembly());
+        var configFolderPath = Path.Combine(modPath, "config");
+
+        // Carregar config.json (mapeamento de tamanhos)
         try
         {
-            var modPath = modHelper.GetAbsolutePathToModFolder(Assembly.GetExecutingAssembly());
-
-            var configFolderPath = Path.Combine(modPath, "config");
-
-            _config = modHelper.GetJsonDataFromFile<ModConfig>(configFolderPath, "config.json");
-
-            if (_config == null)
+            _sizeMappingConfig = modHelper.GetJsonDataFromFile<ModConfig>(configFolderPath, "config.json");
+            if (_sizeMappingConfig == null)
             {
-                throw new Exception("Config file could not be loaded or is empty.");
+                logger.Warning("[JERO] JeroBackpack: config.json not found or empty. Using default values.");
+                _sizeMappingConfig = new ModConfig();
             }
         }
         catch (Exception e)
         {
-            logger.Error($"Jero's Backpack Mod: CRITICAL ERROR loading config.json. The mod will not apply any changes. Please check your config file for errors. Details: {e.Message}");
+            logger.Error($"[JERO] JeroBackpack: ERROR loading config.json. Details: {e.Message}");
+            _sizeMappingConfig = new ModConfig();
+        }
+
+        // Carregar item.json (customizações específicas)
+        try
+        {
+            _itemCustomConfig = modHelper.GetJsonDataFromFile<ItemCustomConfig>(configFolderPath, "item.json");
+            if (_itemCustomConfig == null)
+            {
+                logger.Info("[JERO] JeroBackpack: item.json not found. No specific customizations will be applied.");
+                _itemCustomConfig = new ItemCustomConfig();
+            }
+        }
+        catch (Exception e)
+        {
+            logger.Warning($"[JERO] JeroBackpack: ERROR loading item.json. Details: {e.Message}");
+            _itemCustomConfig = new ItemCustomConfig();
+        }
+
+        // Carregar blacklist.json
+        try
+        {
+            _blacklistConfig = modHelper.GetJsonDataFromFile<BlacklistConfig>(configFolderPath, "blacklist.json");
+            if (_blacklistConfig == null)
+            {
+                logger.Info("[JERO] JeroBackpack: blacklist.json not found. No backpacks will be blocked.");
+                _blacklistConfig = new BlacklistConfig();
+            }
+        }
+        catch (Exception e)
+        {
+            logger.Warning($"[JERO] JeroBackpack: ERROR loading blacklist.json. Details: {e.Message}");
+            _blacklistConfig = new BlacklistConfig();
+        }
+
+        logger.Info("[JERO] JeroBackpack: Starting backpack resizing...");
+        var itemsDb = databaseServer.GetTables().Templates.Items;
+        int successCount = 0;
+        int skippedCount = 0;
+
+        // Verificar se há mapeamento de tamanhos para o Parent ID de backpack
+        if (_sizeMappingConfig?.SizeMappings == null || !_sizeMappingConfig.SizeMappings.TryGetValue(BACKPACK_PARENT_ID, out var sizeMappings))
+        {
+            logger.Warning($"[JERO] JeroBackpack: No size mappings found for Parent ID {BACKPACK_PARENT_ID} in config.json.");
             return Task.CompletedTask;
         }
 
-        logger.Info("Jero's Backpack Mod: Starting to resize multiple backpacks from config...");
-        var itemsDb = databaseServer.GetTables().Templates.Items;
-        int successCount = 0;
-
-        foreach (var backpackEntry in _config.Backpacks)
+        // Iterar sobre todos os itens no banco de dados
+        foreach (var itemEntry in itemsDb)
         {
-            string backpackId = backpackEntry.Key;
-            GridSize newSize = backpackEntry.Value;
+            var item = itemEntry.Value;
+            string itemId = itemEntry.Key;
 
-            if (itemsDb.TryGetValue(backpackId, out var backpackToChange))
+            // Verificar se é uma mochila (Parent ID = BACKPACK_PARENT_ID)
+            if (item.Parent != BACKPACK_PARENT_ID)
             {
-                var mainGrid = backpackToChange.Properties.Grids.FirstOrDefault();
-                if (mainGrid?.Properties != null)
+                continue;
+            }
+
+            // Verificar se está na blacklist
+            if (_blacklistConfig?.Blacklist != null && _blacklistConfig.Blacklist.ContainsKey(itemId))
+            {
+                skippedCount++;
+                continue;
+            }
+
+            // Verificar se tem múltiplos grids (não suportado)
+            var grids = item.Properties?.Grids;
+            if (grids == null)
+            {
+                continue;
+            }
+
+            var gridCount = grids.Count();
+            if (gridCount == 0)
+            {
+                continue;
+            }
+
+            if (gridCount > 1)
+            {
+                skippedCount++;
+                continue;
+            }
+
+            var mainGrid = grids.FirstOrDefault();
+            if (mainGrid?.Properties == null)
+            {
+                continue;
+            }
+
+            int oldH = mainGrid.Properties.CellsH ?? 0;
+            int oldV = mainGrid.Properties.CellsV ?? 0;
+
+            if (oldH == 0 || oldV == 0)
+            {
+                continue;
+            }
+
+            // Verificar se tem customização específica no item.json
+            if (_itemCustomConfig?.Backpacks != null && _itemCustomConfig.Backpacks.TryGetValue(itemId, out var customSize))
+            {
+                mainGrid.Properties.CellsH = customSize.Horizontal;
+                mainGrid.Properties.CellsV = customSize.Vertical;
+                successCount++;
+            }
+            else
+            {
+                // Usar mapeamento de tamanhos baseado no tamanho antigo
+                string sizeKey = $"{oldH}x{oldV}";
+                if (sizeMappings.TryGetValue(sizeKey, out var sizeMapping))
                 {
-                    int oldH = mainGrid.Properties.CellsH ?? 0;
-                    int oldV = mainGrid.Properties.CellsV ?? 0;
-
-                    mainGrid.Properties.CellsH = newSize.Horizontal;
-                    mainGrid.Properties.CellsV = newSize.Vertical;
-
-                    //logger.Info($"Resized backpack '{backpackToChange.Name}' from {oldH}x{oldV} to {newSize.Horizontal}x{newSize.Vertical}.");
+                    mainGrid.Properties.CellsH = sizeMapping.NewHorizontal;
+                    mainGrid.Properties.CellsV = sizeMapping.NewVertical;
                     successCount++;
                 }
                 else
                 {
-                    logger.Warning($"Backpack '{backpackToChange.Name}' (ID: {backpackId}) was found, but it has no grid to modify.");
+                    logger.Debug($"[JERO] JeroBackpack: No mapping found for size {sizeKey} of backpack '{item.Name}' (ID: {itemId}).");
                 }
-            }
-            else
-            {
-                logger.Warning($"Jero's Backpack Mod: Backpack with ID '{backpackId}' not found in database, skipping.");
             }
         }
 
-        logger.Success($"Jero's Backpack Mod: Finished! Successfully modified {successCount} out of {_config.Backpacks.Count} backpacks from config.");
+        logger.Success($"[JERO] JeroBackpack: Completed! {successCount} backpacks modified, {skippedCount} backpacks ignored (blacklist or multiple grids).");
         return Task.CompletedTask;
     }
 }

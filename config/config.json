@@ -1,38 +1,21 @@
 {
-  "Backpacks": {
-    "5df8a4d786f77412672a1e3b": { "ItemName": "6Sh118 raid backpack", "Horizontal": 6, "Vertical": 11 },
-    "5e4abc6786f77406812bd572": { "ItemName": "LBT-2670 Slim Field Med Pack", "Horizontal": 6, "Vertical": 11 },
-    "5c0e774286f77468413cc5b2": { "ItemName": "Mystery Ranch Blackjack 50", "Horizontal": 6, "Vertical": 10 },
-    "5ab8ebf186f7742d8b372e80": { "ItemName": "SSO Attack 2 raid backpack", "Horizontal": 5, "Vertical": 10 },
-    "61b9e1aaef9a1b5d6a79899a": { "ItemName": "Santa's Bag", "Horizontal": 5, "Vertical": 10 },
-    "59e763f286f7742ee57895da": { "ItemName": "Pilgrim tourist backpack", "Horizontal": 5, "Vertical": 10 },
-    "639346cc1c8f182ad90c8972": { "ItemName": "Tasmanian Tiger Trooper 35", "Horizontal": 5, "Vertical": 10 },
-    "66b5f22b78bbc0200425f904": { "ItemName": "Camelbak TriZip (Multicam)", "Horizontal": 5, "Vertical": 8 },
-    "545cdae64bdc2d39198b4568": { "ItemName": "Camelbak TriZip (Foliage)", "Horizontal": 5, "Vertical": 8 },
-    "628e1ffc83ec92260c0f437f": { "ItemName": "Gruppa 99 T30", "Horizontal": 5, "Vertical": 8 },
-    "62a1b7fbc30cfa1d366af586": { "ItemName": "Gruppa 99 T30 (Multicam)", "Horizontal": 5, "Vertical": 8 },
-    "5b44c6ae86f7742d1627baea": { "ItemName": "ANA Tactical Beta 2", "Horizontal": 5, "Vertical": 8 },
-    "5f5e467b0bc58666c37e7821": { "ItemName": "Eberlestock F5 Switchblade", "Horizontal": 5, "Vertical": 8 },
-    "6034d103ca006d2dca39b3f0": { "ItemName": "Hazard 4 Takedown (Black)", "Horizontal": 4, "Vertical": 9 },
-    "6038d614d10cbf667352dd44": { "ItemName": "Hazard 4 Takedown (Multicam)", "Horizontal": 4, "Vertical": 9 },
-    "618bb76513f5097c8d5aa2d5": { "ItemName": "Gruppa 99 T20 (Black/Duplicate)", "Horizontal": 5, "Vertical": 7 },
-    "619cf0335771dd3c390269ae": { "ItemName": "Gruppa 99 T20 (Multicam)", "Horizontal": 5, "Vertical": 7 },
-    "60a272cc93ef783291411d8e": { "ItemName": "Hazard 4 Drawbridge", "Horizontal": 5, "Vertical": 7 },
-    "67458794e21e5d724e066976": { "ItemName": "LBT-1476A (Alpine)", "Horizontal": 5, "Vertical": 7 },
-    "618cfae774bb2d036a049e7c": { "ItemName": "LBT-1476A (Woodland)", "Horizontal": 5, "Vertical": 7 },
-    "66a9f98f3bd5a41b162030f4": { "ItemName": "Partisan's Bag", "Horizontal": 5, "Vertical": 6 },
-    "5e997f0b86f7741ac73993e2": { "ItemName": "Sanitar's bag", "Horizontal": 5, "Vertical": 6 },
-    "60a2828e8689911a226117f9": { "ItemName": "Hazard 4 Pillbox", "Horizontal": 5, "Vertical": 6 },
-    "5e9dcf5986f7746c417435b3": { "ItemName": "LBT-8005A Day Pack", "Horizontal": 5, "Vertical": 6 },
-    "56e335e4d2720b6c058b456d": { "ItemName": "Scav backpack", "Horizontal": 5, "Vertical": 6 },
-    "5ca20d5986f774331e7c9602": { "ItemName": "WARTECH Berkut BB102", "Horizontal": 5, "Vertical": 6 },
-    "66b5f247af44ca0014063c02": { "ItemName": "Vertx Ready Pack (Red)", "Horizontal": 4, "Vertical": 6 },
-    "628bc7fB408e2b2e9c0801b1": { "ItemName": "Mystery Ranch NICE COMM 3", "Horizontal": 3, "Vertical": 7 },
-    "544a5cde4bdc2d39388b456b": { "ItemName": "Flyye MBSS backpack", "Horizontal": 4, "Vertical": 6 },
-    "56e33634d2720bd8058b456b": { "ItemName": "Duffle bag", "Horizontal": 4, "Vertical": 4 },
-    "5f5e45cc5021ce62144be7aa": { "ItemName": "LolKek 3F Transfer", "Horizontal": 4, "Vertical": 4 },
-    "56e33680d2720be2748b4576": { "ItemName": "Transformer Bag", "Horizontal": 4, "Vertical": 3 },
-    "5ab8ee7786f7742d8f33f0b9": { "ItemName": "VKBO army bag", "Horizontal": 4, "Vertical": 3 },
-    "5ab8f04f86f774585f4237d8": { "ItemName": "Tactical sling bag", "Horizontal": 3, "Vertical": 3 }
-  }
+    "SizeMappings": {
+        "5448e53e4bdc2d60728b4567": {
+            "6x8": { "OldHorizontal": 6, "OldVertical": 8, "NewHorizontal": 6, "NewVertical": 11 },
+            "6x7": { "OldHorizontal": 6, "OldVertical": 7, "NewHorizontal": 6, "NewVertical": 10 },
+            "5x7": { "OldHorizontal": 5, "OldVertical": 7, "NewHorizontal": 5, "NewVertical": 10 },
+            "5x6": { "OldHorizontal": 5, "OldVertical": 6, "NewHorizontal": 5, "NewVertical": 8 },
+            "3x8": { "OldHorizontal": 3, "OldVertical": 8, "NewHorizontal": 4, "NewVertical": 9 },
+            "5x5": { "OldHorizontal": 5, "OldVertical": 5, "NewHorizontal": 5, "NewVertical": 7 },
+            "5x4": { "OldHorizontal": 5, "OldVertical": 4, "NewHorizontal": 5, "NewVertical": 6 },
+            "4x5": { "OldHorizontal": 4, "OldVertical": 5, "NewHorizontal": 5, "NewVertical": 6 },
+            "4x4": { "OldHorizontal": 4, "OldVertical": 4, "NewHorizontal": 4, "NewVertical": 6 },
+            "2x7": { "OldHorizontal": 2, "OldVertical": 7, "NewHorizontal": 3, "NewVertical": 7 },
+            "4x3": { "OldHorizontal": 4, "OldVertical": 3, "NewHorizontal": 4, "NewVertical": 4 },
+            "3x4": { "OldHorizontal": 3, "OldVertical": 4, "NewHorizontal": 4, "NewVertical": 4 },
+            "3x3": { "OldHorizontal": 3, "OldVertical": 3, "NewHorizontal": 4, "NewVertical": 3 },
+            "4x2": { "OldHorizontal": 4, "OldVertical": 2, "NewHorizontal": 4, "NewVertical": 3 },
+            "3x2": { "OldHorizontal": 3, "OldVertical": 2, "NewHorizontal": 3, "NewVertical": 3 }
+        }
+    }
 }

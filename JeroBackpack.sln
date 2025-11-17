@@ -1,9 +1,9 @@
 ﻿
 Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
-VisualStudioVersion = 17.14.36518.9 d17.14
+VisualStudioVersion = 17.14.36518.9
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "jerobackpack", "jerobackpack.csproj", "{B7B80FCB-3322-4983-A781-8517102D4C8C}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "JeroBackpack", "JeroBackpack.csproj", "{B7B80FCB-3322-4983-A781-8517102D4C8C}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
