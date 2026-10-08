@@ -33,6 +33,14 @@ bld/
 # Visual Studio Code directory
 .vscode/
 
+# Cursor rules
+.cursorrules
+
+# Claude Code
+CLAUDE.md
+CLAUDE.local.md
+.claude/
+
 # NuGet Packages
 *.nupkg
 *.nuget.props

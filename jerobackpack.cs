@@ -1,16 +1,16 @@
-﻿using SPTarkov.DI.Annotations;
+﻿using SPTarkov.Common.Models.Logging;
+using SPTarkov.DI.Annotations;
 using SPTarkov.Server.Core.DI;
-using SPTarkov.Server.Core.Helpers;
-using SPTarkov.Server.Core.Models.Utils;
-using SPTarkov.Server.Core.Servers;
+using SPTarkov.Server.Core.Helpers.Server;
+using SPTarkov.Server.Core.Models.Spt.Tables;
 using System.Reflection;
 
 namespace JeroBackpack;
 
-[Injectable(TypePriority = OnLoadOrder.PostDBModLoader + 10)]
+[Injectable(TypePriority = OnLoadOrder.PostLoad + 10)]
 public class JeroBackpack(
     ISptLogger<JeroBackpack> logger,
-    DatabaseServer databaseServer,
+    TemplateTable templateTable,
     ModHelper modHelper
 ) : IOnLoad
 {
@@ -20,7 +20,7 @@ public class JeroBackpack(
     private ItemCustomConfig? _itemCustomConfig;
     private BlacklistConfig? _blacklistConfig;
 
-    public Task OnLoad()
+    public Task OnLoadAsync(CancellationToken cancellationToken)
     {
         var modPath = modHelper.GetAbsolutePathToModFolder(Assembly.GetExecutingAssembly());
         var configFolderPath = Path.Combine(modPath, "config");
@@ -74,7 +74,7 @@ public class JeroBackpack(
         }
 
         logger.Info("[JERO] JeroBackpack: Starting backpack resizing...");
-        var itemsDb = databaseServer.GetTables().Templates.Items;
+        var itemsDb = templateTable.Items;
         int successCount = 0;
         int skippedCount = 0;
 
