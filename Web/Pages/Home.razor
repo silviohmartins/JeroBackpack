@@ -596,7 +596,7 @@
         if (focusEditField && editHField is not null)
         {
             focusEditField = false;
-            await editHField.FocusAsync();
+            await TryFocusAsync(async () => await editHField.FocusAsync());
         }
 
         if (focusReturnId is not null)
@@ -606,7 +606,7 @@
 
             if (editButtons.TryGetValue(id, out var button))
             {
-                await button.FocusAsync();
+                await TryFocusAsync(async () => await button.FocusAsync());
             }
         }
 
@@ -614,7 +614,22 @@
         {
             var field = focusAddField;
             focusAddField = null;
-            await field.FocusAsync();
+            await TryFocusAsync(async () => await field.FocusAsync());
+        }
+    }
+
+    // Foco é só conveniência. O elemento pode ter saído da tela entre o render e a chamada
+    // (ex.: o filtro "Rule" esconde a linha que acabou de ganhar override). Uma exceção aqui
+    // derrubaria o circuito do Blazor e a página pararia de responder, inclusive o Save.
+    private static async Task TryFocusAsync(Func<Task> focus)
+    {
+        try
+        {
+            await focus();
+        }
+        catch (Exception)
+        {
+            // Ignorado de propósito: perder o foco não afeta o rascunho
         }
     }
 
