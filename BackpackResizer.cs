@@ -6,6 +6,18 @@ namespace JeroBackpack;
 
 public record ResizeResult(int SuccessCount, int SkippedCount);
 
+// Origem do tamanho final de cada mochila, exibida na página web
+public enum BackpackSource
+{
+    Mapping,
+    Override,
+    Blacklist,
+    MultipleGrids,
+    NoMapping,
+}
+
+public record BackpackEntry(string ItemId, string? ItemName, int OriginalH, int OriginalV, int FinalH, int FinalV, BackpackSource Source);
+
 [Injectable(InjectionType.Singleton)]
 public class BackpackResizer(
     ISptLogger<BackpackResizer> logger,
@@ -18,12 +30,16 @@ public class BackpackResizer(
     // Tamanho original de cada grid alterada, para permitir reverter e reaplicar
     private readonly Dictionary<string, (int H, int V)> _originalSizes = [];
 
+    private readonly List<BackpackEntry> _entries = [];
+
     public ResizeResult LastResult { get; private set; } = new(0, 0);
+    public IReadOnlyList<BackpackEntry> Entries => _entries;
 
     public ResizeResult Apply()
     {
         // Sempre parte dos tamanhos originais, senão reaplicar aumentaria a grid de novo
         Revert();
+        _entries.Clear();
 
         var sizeMappingConfig = configService.SizeMappingConfig;
         var itemCustomConfig = configService.ItemCustomConfig;
@@ -56,6 +72,10 @@ public class BackpackResizer(
             // Verificar se está na blacklist
             if (blacklistConfig.Blacklist != null && blacklistConfig.Blacklist.ContainsKey(itemId))
             {
+                var blacklistedGrid = item.Properties?.Grids?.FirstOrDefault()?.Properties;
+                int h = blacklistedGrid?.CellsH ?? 0;
+                int v = blacklistedGrid?.CellsV ?? 0;
+                _entries.Add(new BackpackEntry(itemId, item.Name, h, v, h, v, BackpackSource.Blacklist));
                 skippedCount++;
                 continue;
             }
@@ -75,6 +95,7 @@ public class BackpackResizer(
 
             if (gridCount > 1)
             {
+                _entries.Add(new BackpackEntry(itemId, item.Name, 0, 0, 0, 0, BackpackSource.MultipleGrids));
                 skippedCount++;
                 continue;
             }
@@ -95,12 +116,14 @@ public class BackpackResizer(
 
             int newH;
             int newV;
+            BackpackSource source;
 
             // Verificar se tem customização específica no item.json
             if (itemCustomConfig.Backpacks != null && itemCustomConfig.Backpacks.TryGetValue(itemId, out var customSize))
             {
                 newH = customSize.Horizontal;
                 newV = customSize.Vertical;
+                source = BackpackSource.Override;
             }
             else
             {
@@ -109,16 +132,19 @@ public class BackpackResizer(
                 if (!sizeMappings.TryGetValue(sizeKey, out var sizeMapping))
                 {
                     logger.Debug($"[JERO] JeroBackpack: No mapping found for size {sizeKey} of backpack '{item.Name}' (ID: {itemId}).");
+                    _entries.Add(new BackpackEntry(itemId, item.Name, oldH, oldV, oldH, oldV, BackpackSource.NoMapping));
                     continue;
                 }
 
                 newH = sizeMapping.NewHorizontal;
                 newV = sizeMapping.NewVertical;
+                source = BackpackSource.Mapping;
             }
 
             _originalSizes[itemId] = (oldH, oldV);
             mainGrid.Properties.CellsH = newH;
             mainGrid.Properties.CellsV = newV;
+            _entries.Add(new BackpackEntry(itemId, item.Name, oldH, oldV, newH, newV, source));
             successCount++;
         }
 

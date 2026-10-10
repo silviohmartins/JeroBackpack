@@ -1,11 +1,12 @@
 @page "/jerobackpack"
 @attribute [Authorize(Policy = "Administrator")]
 @layout BaseMudBlazorLayout
+@rendermode InteractiveServer
 @inject BackpackResizer Resizer
+@inject LocaleService LocaleService
 
 <PageTitle>JeroBackpack</PageTitle>
 
-@* Página inicial mínima: valida o registro da página no SIC antes de evoluir para o editor *@
 <MudContainer MaxWidth="MaxWidth.Large" Class="pa-6">
     <MudPaper Elevation="0" Class="spt-panel pa-5">
         <MudText Typo="Typo.overline" Class="spt-kicker">Backpack configuration</MudText>
@@ -14,4 +15,105 @@
             @Resizer.LastResult.SuccessCount backpacks modified, @Resizer.LastResult.SkippedCount ignored.
         </MudText>
     </MudPaper>
+
+    <MudPaper Elevation="0" Class="spt-panel pa-4 mt-4">
+        <MudTable Items="@rows" Filter="FilterRow" Dense="true" Hover="true" Elevation="0"
+                  SortLabel="Sort by" RowsPerPage="25">
+            <ToolBarContent>
+                <MudText Typo="Typo.h6">Backpacks</MudText>
+                <MudSpacer />
+                <MudSelect T="BackpackSource?" @bind-Value="sourceFilter" Label="Source" Clearable="true"
+                           Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Class="mr-4" Style="max-width: 200px">
+                    @foreach (var source in Enum.GetValues<BackpackSource>())
+                    {
+                        <MudSelectItem T="BackpackSource?" Value="@source">@SourceLabel(source)</MudSelectItem>
+                    }
+                </MudSelect>
+                <MudTextField @bind-Value="search" Placeholder="Search name or ID" Adornment="Adornment.Start"
+                              AdornmentIcon="@Icons.Material.Filled.Search" Immediate="true" DebounceInterval="200"
+                              Margin="Margin.Dense" Variant="Variant.Outlined" Style="max-width: 300px" />
+            </ToolBarContent>
+            <HeaderContent>
+                <MudTh><MudTableSortLabel T="Row" SortBy="r => r.Name" InitialDirection="SortDirection.Ascending">Name</MudTableSortLabel></MudTh>
+                <MudTh>ID</MudTh>
+                <MudTh><MudTableSortLabel T="Row" SortBy="r => r.Entry.OriginalH * 100 + r.Entry.OriginalV">Original</MudTableSortLabel></MudTh>
+                <MudTh><MudTableSortLabel T="Row" SortBy="r => r.Entry.FinalH * 100 + r.Entry.FinalV">Final</MudTableSortLabel></MudTh>
+                <MudTh><MudTableSortLabel T="Row" SortBy="r => r.Entry.Source">Source</MudTableSortLabel></MudTh>
+            </HeaderContent>
+            <RowTemplate>
+                <MudTd DataLabel="Name">@context.Name</MudTd>
+                <MudTd DataLabel="ID"><code>@context.Entry.ItemId</code></MudTd>
+                <MudTd DataLabel="Original">@FormatSize(context.Entry.OriginalH, context.Entry.OriginalV)</MudTd>
+                <MudTd DataLabel="Final">@FormatSize(context.Entry.FinalH, context.Entry.FinalV)</MudTd>
+                <MudTd DataLabel="Source">
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@SourceColor(context.Entry.Source)">
+                        @SourceLabel(context.Entry.Source)
+                    </MudChip>
+                </MudTd>
+            </RowTemplate>
+            <PagerContent>
+                <MudTablePager />
+            </PagerContent>
+        </MudTable>
+    </MudPaper>
 </MudContainer>
+
+@code {
+    // Linha da tabela: entrada do resizer + nome localizado
+    private sealed record Row(BackpackEntry Entry, string Name);
+
+    private List<Row> rows = [];
+    private string search = string.Empty;
+    private BackpackSource? sourceFilter;
+
+    protected override void OnInitialized()
+    {
+        var localeDb = LocaleService.GetLocaleDb();
+
+        rows = Resizer.Entries
+            .Select(entry => new Row(
+                entry,
+                localeDb.TryGetValue($"{entry.ItemId} Name", out var locale) ? locale : entry.ItemName ?? entry.ItemId))
+            .ToList();
+    }
+
+    private bool FilterRow(Row row)
+    {
+        if (sourceFilter is not null && row.Entry.Source != sourceFilter)
+        {
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(search))
+        {
+            return true;
+        }
+
+        return row.Name.Contains(search, StringComparison.OrdinalIgnoreCase)
+            || row.Entry.ItemId.Contains(search, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static string FormatSize(int h, int v)
+    {
+        return h == 0 || v == 0 ? "-" : $"{h}x{v}";
+    }
+
+    private static string SourceLabel(BackpackSource source) => source switch
+    {
+        BackpackSource.Mapping => "Mapping",
+        BackpackSource.Override => "Override",
+        BackpackSource.Blacklist => "Blacklist",
+        BackpackSource.MultipleGrids => "Multiple grids",
+        BackpackSource.NoMapping => "No mapping",
+        _ => source.ToString(),
+    };
+
+    private static Color SourceColor(BackpackSource source) => source switch
+    {
+        BackpackSource.Mapping => Color.Success,
+        BackpackSource.Override => Color.Info,
+        BackpackSource.Blacklist => Color.Error,
+        BackpackSource.MultipleGrids => Color.Warning,
+        _ => Color.Default,
+    };
+}
