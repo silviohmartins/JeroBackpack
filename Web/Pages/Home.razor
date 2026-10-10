@@ -1,0 +1,17 @@
+@page "/jerobackpack"
+@attribute [Authorize(Policy = "Administrator")]
+@layout BaseMudBlazorLayout
+@inject BackpackResizer Resizer
+
+<PageTitle>JeroBackpack</PageTitle>
+
+@* Página inicial mínima: valida o registro da página no SIC antes de evoluir para o editor *@
+<MudContainer MaxWidth="MaxWidth.Large" Class="pa-6">
+    <MudPaper Elevation="0" Class="spt-panel pa-5">
+        <MudText Typo="Typo.overline" Class="spt-kicker">Backpack configuration</MudText>
+        <MudText Typo="Typo.h3" Class="spt-title">JeroBackpack</MudText>
+        <MudText Typo="Typo.body1" Class="mt-4">
+            @Resizer.LastResult.SuccessCount backpacks modified, @Resizer.LastResult.SkippedCount ignored.
+        </MudText>
+    </MudPaper>
+</MudContainer>

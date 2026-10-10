@@ -1,10 +1,11 @@
 ﻿using SPTarkov.Server.Core.Models.Spt.Mod;
+using SPTarkov.Server.Web;
 using Range = SemanticVersioning.Range;
 using Version = SemanticVersioning.Version;
 
 namespace JeroBackpack;
     
-public record ModMetadata : IModMetadata
+public record ModMetadata : IModMetadata, IModBlazorMetadata
 {
     public string ModGuid { get; init; } = "com.jero.jerobackpack";
     public string Name { get; init; } = "jerobackpack";
@@ -17,4 +18,9 @@ public record ModMetadata : IModMetadata
     public string? Url { get; init; }
     public string License { get; init; } = "MIT";
     public bool HasPrepatcher { get; init; }
+
+    // Null usa o nome do assembly como URL do wwwroot (/JeroBackpack/)
+    public string? WWWRootUrl { get; init; }
+    public string? HomePage { get; init; } = "/jerobackpack";
+    public string? HomePageDescription { get; init; } = "Configure backpack grid sizes, overrides and blacklist.";
 }
