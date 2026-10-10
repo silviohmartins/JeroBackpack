@@ -2,139 +2,316 @@
 @attribute [Authorize(Policy = "Administrator")]
 @layout BaseMudBlazorLayout
 @rendermode InteractiveServer
+@using Microsoft.AspNetCore.Components.Routing
 @inject BackpackResizer Resizer
 @inject BackpackConfigService ConfigService
 @inject LocaleService LocaleService
 @inject JsonUtil Json
 @inject ICloner Cloner
 @inject ISnackbar Snackbar
+@inject IDialogService DialogService
 
 <PageTitle>JeroBackpack</PageTitle>
 
+@* Estilos da página; prefixo jb- para não colidir com o SIC *@
+<style>
+    .jb-num { font-variant-numeric: tabular-nums; }
+    .jb-id { display: block; margin-top: 2px; font-size: .75rem; color: var(--spt-text-muted); }
+    .jb-unsaved { margin-left: 8px; font-size: .75rem; font-weight: 700; color: var(--spt-accent); }
+    .jb-row-changed { background: rgba(250, 204, 21, .06); }
+    .jb-row-flash { background: rgba(56, 189, 248, .12); }
+    .jb-row-removed td { color: var(--spt-text-muted); }
+    .jb-row-removed .jb-strike { text-decoration: line-through; }
+    .jb-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+    .jb-size { display: inline-flex; align-items: center; gap: 10px; }
+    .jb-size-text { display: flex; flex-direction: column; line-height: 1.3; }
+    .jb-sub { font-size: .75rem; color: var(--spt-text-muted); }
+    .jb-shrink, .jb-warn { display: inline-flex; align-items: center; gap: 4px; font-size: .75rem; font-weight: 600; color: var(--mud-palette-warning); }
+
+    /* Desenho da grid: área original em cinza, células ganhas em amarelo, perdidas em contorno tracejado */
+    .jb-grid-slot { display: inline-flex; flex: none; align-items: center; justify-content: center; width: 44px; height: 44px; overflow: hidden; }
+    .jb-grid { position: relative; display: block; background: var(--spt-accent); border-radius: 1px; }
+    .jb-grid-orig { position: absolute; left: 0; bottom: 0; background: #71717a; outline: 1px solid rgba(9, 9, 11, .9); }
+    .jb-grid-lost { position: absolute; left: 0; bottom: 0; outline: 1px dashed var(--mud-palette-warning); outline-offset: -1px; }
+
+    .jb-note { margin-top: 2px; font-size: .75rem; color: var(--spt-text-muted); }
+    .jb-rule-plain { display: inline-flex; align-items: center; gap: 6px; font-size: .8125rem; color: var(--spt-text-muted); }
+    .mud-chip.jb-chip-accent { border-color: var(--spt-accent); color: var(--spt-accent); }
+    .mud-chip.jb-chip-accent .mud-chip-icon { color: var(--spt-accent); }
+
+    .jb-rules { margin-bottom: 16px; font-size: .875rem; color: #d4d4d8; }
+    .jb-rules ol { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px 20px; margin: 8px 0; padding: 0; counter-reset: rule; }
+    .jb-rules li { display: flex; align-items: center; gap: 6px; list-style: none; counter-increment: rule; }
+    .jb-rules li::before { content: counter(rule) "."; color: var(--spt-text-muted); font-variant-numeric: tabular-nums; }
+    .jb-rules li.jb-rule-last::before { content: none; }
+    .jb-rules strong { color: var(--spt-text); font-weight: 700; }
+    .jb-rules-foot { font-size: .8125rem; color: var(--spt-text-muted); }
+
+    .jb-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px 16px; width: 100%; }
+    .jb-toolbar > .jb-search { flex: 0 1 300px; min-width: 200px; }
+    .jb-toolbar > .jb-filter { flex: 0 1 200px; min-width: 160px; }
+    .jb-toolbar .mud-input { font-size: .875rem; }
+
+    .jb-actions { display: inline-grid; grid-template-columns: 30px 30px 30px minmax(30px, auto); align-items: center; justify-items: center; }
+    .jb-actions .mud-button-root.jb-unblock { min-width: 0; padding: 2px 8px; text-transform: none; }
+
+    .jb-savebar {
+        position: sticky;
+        bottom: 16px;
+        z-index: 5;
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        gap: 12px 16px;
+        margin-top: 16px;
+        padding: 14px 18px;
+        border-color: rgba(250, 204, 21, .55) !important;
+    }
+    .jb-savebar-text { display: flex; flex: 1 1 320px; flex-direction: column; gap: 2px; }
+    .jb-savebar-text strong { color: var(--spt-text); }
+    .jb-savebar-hint { font-size: .8125rem; color: var(--spt-text-muted); }
+
+    .jb-scroll { overflow-x: auto; }
+    .jb-pair { display: flex; align-items: center; gap: 6px; }
+    .jb-pair .mud-input-control { width: 72px; flex: none; }
+    .jb-pair-x { color: var(--spt-text-muted); }
+    .jb-names { padding: 4px 0 10px; font-size: .8125rem; color: var(--spt-text-muted); }
+    .mud-button-root.jb-count { min-width: 0; padding-left: 0; padding-right: 4px; text-transform: none; }
+    .mud-button-root.jb-add.mud-button-disabled { color: var(--spt-text-muted) !important; border-color: var(--spt-border-strong) !important; }
+</style>
+
+<NavigationLock ConfirmExternalNavigation="@HasChanges" OnBeforeInternalNavigation="ConfirmLeaveAsync" />
+
 <MudContainer MaxWidth="MaxWidth.Large" Class="pa-6">
     <MudPaper Elevation="0" Class="spt-panel pa-5">
-        <MudText Typo="Typo.overline" Class="spt-kicker">Backpack configuration</MudText>
-        <MudText Typo="Typo.h3" Class="spt-title">JeroBackpack</MudText>
-        <MudText Typo="Typo.body1" Class="mt-4">
-            @Resizer.LastResult.SuccessCount backpacks modified, @Resizer.LastResult.SkippedCount ignored.
-        </MudText>
+        <MudText Typo="Typo.h4" HtmlTag="h1" Class="spt-title">JeroBackpack</MudText>
+        <MudText Typo="Typo.body1" Class="spt-muted mt-3">@SavedSummary</MudText>
     </MudPaper>
 
-    @if (HasChanges)
+    @* Some quando o admin volta a editar, para não conviver com "unsaved" *@
+    @if (savedNotice is not null && !HasChanges)
     {
-        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Class="mt-4"
-                  ContentAlignment="HorizontalAlignment.Left">
-            <div class="d-flex align-center flex-wrap" style="gap: 12px">
-                <span>
-                    @ChangedCount backpack(s) with unsaved changes. Saving rewrites the config files and re-applies sizes on the server;
-                    restart the game client to see them.
-                </span>
-                <MudSpacer />
-                <MudButton Variant="Variant.Text" Color="Color.Default" OnClick="Discard" Disabled="saving">Discard</MudButton>
-                <MudButton Variant="Variant.Filled" Color="Color.Warning" OnClick="SaveAsync" Disabled="saving"
-                           StartIcon="@Icons.Material.Filled.Save">Save</MudButton>
-            </div>
-        </MudAlert>
+        <MudAlert Severity="Severity.Success" Variant="Variant.Outlined" Class="mt-4" ShowCloseIcon="true"
+                  CloseIconClicked="() => savedNotice = null">@savedNotice</MudAlert>
+    }
+
+    @if (saveError is not null)
+    {
+        <MudAlert Severity="Severity.Error" Variant="Variant.Outlined" Class="mt-4" ShowCloseIcon="true"
+                  CloseIconClicked="() => saveError = null">@saveError</MudAlert>
     }
 
     @* Abas compartilham o mesmo rascunho e a mesma barra de salvar *@
     <MudTabs Elevation="0" Rounded="true" Class="mt-4">
         <MudTabPanel Text="@TabTitle("Backpacks", ChangedCount)">
         <MudPaper Elevation="0" Class="spt-panel pa-4 mt-4">
+        <div class="jb-rules">
+            <span>Each backpack takes the first rule that applies:</span>
+            <ol>
+                <li><MudIcon Icon="@SourceIcon(BackpackSource.Blacklist)" Size="Size.Small" /><strong>Blacklist</strong> never resized</li>
+                <li><MudIcon Icon="@SourceIcon(BackpackSource.MultipleGrids)" Size="Size.Small" /><strong>Multiple grids</strong> not supported, left as is</li>
+                <li><MudIcon Icon="@SourceIcon(BackpackSource.Override)" Size="Size.Small" /><strong>Override</strong> size set for one backpack</li>
+                <li><MudIcon Icon="@SourceIcon(BackpackSource.Mapping)" Size="Size.Small" /><strong>Size mapping</strong> rule by original size</li>
+                <li class="jb-rule-last"><MudIcon Icon="@SourceIcon(BackpackSource.NoMapping)" Size="Size.Small" />otherwise the original size is kept</li>
+            </ol>
+            <span class="jb-rules-foot">Sizes are width x height in cells. Backpacks with several grids show their grid count instead of a size. Widths above @MAX_SAFE_WIDTH cells may not display correctly in the game.</span>
+        </div>
+
         <MudTable Items="@rows" Filter="FilterRow" Dense="true" Hover="true" Elevation="0"
-                  SortLabel="Sort by" RowsPerPage="25" RowClassFunc="RowClass">
+                  SortLabel="Sort by" RowsPerPage="50" RowClassFunc="RowClass">
             <ToolBarContent>
-                <MudText Typo="Typo.h6">Backpacks</MudText>
-                <MudSpacer />
-                <MudSelect T="BackpackSource?" @bind-Value="sourceFilter" Label="Source" Clearable="true"
-                           Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined" Class="mr-4" Style="max-width: 200px">
-                    @foreach (var source in Enum.GetValues<BackpackSource>())
-                    {
-                        <MudSelectItem T="BackpackSource?" Value="@source">@SourceLabel(source)</MudSelectItem>
-                    }
-                </MudSelect>
-                <MudTextField @bind-Value="search" Placeholder="Search name or ID" Adornment="Adornment.Start"
-                              AdornmentIcon="@Icons.Material.Filled.Search" Immediate="true" DebounceInterval="200"
-                              Margin="Margin.Dense" Variant="Variant.Outlined" Style="max-width: 300px" />
+                <div class="jb-toolbar">
+                    <div class="jb-search">
+                    <MudTextField @bind-Value="search" Placeholder="Search name or ID" Adornment="Adornment.Start"
+                                  AdornmentIcon="@Icons.Material.Filled.Search" Immediate="true" DebounceInterval="200"
+                                  Margin="Margin.Dense" Variant="Variant.Outlined" />
+                    </div>
+                    <div class="jb-filter">
+                    <MudSelect T="BackpackSource?" @bind-Value="sourceFilter" Label="Rule" Clearable="true"
+                               Dense="true" Margin="Margin.Dense" Variant="Variant.Outlined">
+                        @foreach (var source in Enum.GetValues<BackpackSource>())
+                        {
+                            <MudSelectItem T="BackpackSource?" Value="@source">@SourceLabel(source)</MudSelectItem>
+                        }
+                    </MudSelect>
+                    </div>
+                    <MudCheckBox T="bool" @bind-Value="unsavedOnly" Label="Unsaved only" Dense="true" />
+                </div>
             </ToolBarContent>
             <HeaderContent>
-                <MudTh><MudTableSortLabel T="Row" SortBy="r => r.Name" InitialDirection="SortDirection.Ascending">Name</MudTableSortLabel></MudTh>
-                <MudTh>ID</MudTh>
+                <MudTh><MudTableSortLabel T="Row" SortBy="r => r.Name" InitialDirection="SortDirection.Ascending">Backpack</MudTableSortLabel></MudTh>
                 <MudTh><MudTableSortLabel T="Row" SortBy="r => r.Entry.OriginalH * 100 + r.Entry.OriginalV">Original</MudTableSortLabel></MudTh>
                 <MudTh><MudTableSortLabel T="Row" SortBy="r => SortSize(Preview(r))">Final</MudTableSortLabel></MudTh>
-                <MudTh><MudTableSortLabel T="Row" SortBy="r => Preview(r).Source">Source</MudTableSortLabel></MudTh>
+                <MudTh><MudTableSortLabel T="Row" SortBy="r => Preview(r).Source">Rule</MudTableSortLabel></MudTh>
                 <MudTh Style="text-align: right">Actions</MudTh>
             </HeaderContent>
             <RowTemplate>
                 @{
                     var preview = Preview(context);
                     var changed = IsChanged(context, preview);
+                    var hasSize = context.Entry.OriginalH > 0 && context.Entry.OriginalV > 0;
                 }
-                <MudTd DataLabel="Name">@context.Name</MudTd>
-                <MudTd DataLabel="ID"><code>@context.Entry.ItemId</code></MudTd>
-                <MudTd DataLabel="Original">@FormatSize(context.Entry.OriginalH, context.Entry.OriginalV)</MudTd>
+                <MudTd DataLabel="Backpack">
+                    <span>@context.Name</span>
+                    @if (changed)
+                    {
+                        <span class="jb-unsaved">unsaved</span>
+                    }
+                    <code class="jb-id spt-mono">@context.Entry.ItemId</code>
+                </MudTd>
+                <MudTd DataLabel="Original">
+                    @if (context.Entry.GridCount > 1)
+                    {
+                        <span class="jb-sub">@context.Entry.GridCount grids</span>
+                    }
+                    else
+                    {
+                        <span class="jb-num">@FormatSize(context.Entry.OriginalH, context.Entry.OriginalV)</span>
+                    }
+                </MudTd>
                 <MudTd DataLabel="Final">
                     @if (editingId == context.Entry.ItemId)
                     {
-                        <div class="d-flex align-center" style="gap: 4px">
-                            <MudNumericField T="int" @bind-Value="editH" Min="1" Max="MAX_CELLS" Margin="Margin.Dense"
-                                             Variant="Variant.Outlined" Style="width: 72px" />
-                            <span>x</span>
-                            <MudNumericField T="int" @bind-Value="editV" Min="1" Max="MAX_CELLS" Margin="Margin.Dense"
-                                             Variant="Variant.Outlined" Style="width: 72px" />
-                            <MudIconButton Icon="@Icons.Material.Filled.Check" Size="Size.Small" Color="Color.Success"
-                                           title="Apply override" OnClick="() => ConfirmOverride(context)" />
+                        <div class="jb-pair" @onkeydown="e => EditKeyDown(e, context)">
+                            <MudNumericField T="int" @ref="editHField" @bind-Value="editH" Min="1" Max="MAX_CELLS" Immediate="true"
+                                             Margin="Margin.Dense" Variant="Variant.Outlined" aria-label="Width in cells" title="@CELL_LIMIT_HINT" />
+                            <span class="jb-pair-x" aria-hidden="true">x</span>
+                            <MudNumericField T="int" @bind-Value="editV" Min="1" Max="MAX_CELLS" Immediate="true"
+                                             Margin="Margin.Dense" Variant="Variant.Outlined" aria-label="Height in cells" title="@CELL_LIMIT_HINT" />
+                            <MudIconButton Icon="@Icons.Material.Filled.Check" Size="Size.Small" Color="Color.Primary"
+                                           title="Apply override (Enter)" aria-label="Apply override" OnClick="() => ConfirmOverride(context)" />
                             <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
-                                           title="Cancel" OnClick="CancelEdit" />
+                                           title="Cancel (Esc)" aria-label="Cancel" OnClick="CancelEdit" />
+                        </div>
+                        @if (editH > MAX_SAFE_WIDTH)
+                        {
+                            @WideWarning()
+                        }
+                    }
+                    else
+                    {
+                        <div class="jb-size">
+                            @if (hasSize)
+                            {
+                                @Glyph(context.Entry.OriginalH, context.Entry.OriginalV, preview.H, preview.V)
+                            }
+                            else
+                            {
+                                <span class="jb-grid-slot" aria-hidden="true"></span>
+                            }
+                            <div class="jb-size-text">
+                                @if (hasSize)
+                                {
+                                    <span class="jb-num">
+                                        @FormatSize(preview.H, preview.V)
+                                        <span class="jb-sub">@CellDelta(context.Entry.OriginalH, context.Entry.OriginalV, preview.H, preview.V)</span>
+                                    </span>
+                                }
+                                else
+                                {
+                                    <span class="jb-sub">unchanged</span>
+                                }
+                                @if (changed && hasSize)
+                                {
+                                    <span class="jb-sub jb-num">saved: @FormatSize(context.Entry.FinalH, context.Entry.FinalV)</span>
+                                }
+                                @if (IsShrink(context, preview))
+                                {
+                                    <span class="jb-shrink" title="Items already stored in this backpack may not fit.">
+                                        <MudIcon Icon="@Icons.Material.Filled.TrendingDown" Size="Size.Small" />Smaller than saved
+                                    </span>
+                                }
+                                @if (preview.H > MAX_SAFE_WIDTH)
+                                {
+                                    @WideWarning()
+                                }
+                            </div>
                         </div>
                     }
+                </MudTd>
+                <MudTd DataLabel="Rule">
+                    @* A regra padrão fica discreta; chip só para exceções, override em destaque por ser escolha do admin *@
+                    @if (preview.Source is BackpackSource.Mapping or BackpackSource.NoMapping)
+                    {
+                        <span class="jb-rule-plain">
+                            <MudIcon Icon="@SourceIcon(preview.Source)" Size="Size.Small" />@SourceLabel(preview.Source)
+                        </span>
+                    }
                     else
                     {
-                        <span>@FormatSize(preview.H, preview.V)</span>
-                        @if (changed)
-                        {
-                            <MudText Typo="Typo.caption" Class="ml-1" Style="opacity: .6">
-                                (was @FormatSize(context.Entry.FinalH, context.Entry.FinalV))
-                            </MudText>
-                        }
-                        @if (IsShrink(context, preview))
-                        {
-                            <MudTooltip Text="Smaller than the current size: items already stored in this backpack may not fit.">
-                                <MudIcon Icon="@Icons.Material.Filled.Warning" Color="Color.Warning" Size="Size.Small" Class="ml-1" />
-                            </MudTooltip>
-                        }
+                        <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="Color.Default"
+                                 Class="@(preview.Source == BackpackSource.Override ? "jb-chip-accent" : null)"
+                                 Icon="@SourceIcon(preview.Source)">@SourceLabel(preview.Source)</MudChip>
                     }
-                </MudTd>
-                <MudTd DataLabel="Source">
-                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@SourceColor(preview.Source)">
-                        @SourceLabel(preview.Source)
-                    </MudChip>
+                    @if (RuleNote(context, preview) is { } note)
+                    {
+                        <div class="jb-note">@note</div>
+                    }
                 </MudTd>
                 <MudTd DataLabel="Actions" Style="text-align: right; white-space: nowrap">
-                    @if (preview.Source != BackpackSource.Blacklist && context.Entry.GridCount == 1)
-                    {
-                        <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
-                                       title="Set size override" OnClick="() => StartEdit(context, preview)" />
-                    }
-                    @if (draftItems.Backpacks.ContainsKey(context.Entry.ItemId))
-                    {
-                        <MudIconButton Icon="@Icons.Material.Filled.LayersClear" Size="Size.Small"
-                                       title="Remove size override" OnClick="() => RemoveOverride(context)" />
-                    }
-                    @if (preview.Source == BackpackSource.Blacklist)
-                    {
-                        <MudIconButton Icon="@Icons.Material.Filled.RemoveCircleOutline" Size="Size.Small" Color="Color.Success"
-                                       title="Remove from blacklist" OnClick="() => ToggleBlacklist(context)" />
-                    }
-                    else
-                    {
-                        <MudIconButton Icon="@Icons.Material.Filled.Block" Size="Size.Small" Color="Color.Error"
-                                       title="Add to blacklist" OnClick="() => ToggleBlacklist(context)" />
-                    }
+                    @* Cada ação tem posição fixa, para os ícones não mudarem de lugar entre linhas *@
+                    <div class="jb-actions">
+                        @if (RowDraftDiffers(context))
+                        {
+                            <MudIconButton Icon="@Icons.Material.Filled.Undo" Size="Size.Small"
+                                           title="Undo changes to this backpack" aria-label="Undo changes to this backpack"
+                                           OnClick="() => UndoRow(context)" />
+                        }
+                        else
+                        {
+                            <span></span>
+                        }
+                        @if (preview.Source != BackpackSource.Blacklist && context.Entry.GridCount == 1)
+                        {
+                            <MudIconButton @ref="editButtons[context.Entry.ItemId]" Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
+                                           title="Set size override" aria-label="Set size override" OnClick="() => StartEdit(context, preview)" />
+                        }
+                        else
+                        {
+                            <span></span>
+                        }
+                        @if (draftItems.Backpacks.ContainsKey(context.Entry.ItemId))
+                        {
+                            <MudIconButton Icon="@Icons.Material.Outlined.PushPin" Size="Size.Small"
+                                           title="Remove size override" aria-label="Remove size override" OnClick="() => RemoveOverride(context)" />
+                        }
+                        else
+                        {
+                            <span></span>
+                        }
+                        @if (preview.Source == BackpackSource.Blacklist)
+                        {
+                            <MudButton Variant="Variant.Text" Size="Size.Small" Class="jb-unblock"
+                                       title="Remove from blacklist" OnClick="() => ToggleBlacklist(context)">Unblock</MudButton>
+                        }
+                        else if (context.Entry.GridCount == 1)
+                        {
+                            <MudIconButton Icon="@Icons.Material.Filled.Block" Size="Size.Small"
+                                           title="Add to blacklist" aria-label="Add to blacklist" OnClick="() => ToggleBlacklist(context)" />
+                        }
+                        else
+                        {
+                            <span></span>
+                        }
+                    </div>
                 </MudTd>
             </RowTemplate>
+            <NoRecordsContent>
+                @if (rows.Count == 0)
+                {
+                    <MudText Typo="Typo.body2" Class="spt-muted">No backpacks were found in the item database.</MudText>
+                }
+                else
+                {
+                    <div class="d-flex align-center justify-center flex-wrap" style="gap: 8px">
+                        <MudText Typo="Typo.body2" Class="spt-muted">No backpacks match the current filters.</MudText>
+                        <MudButton Variant="Variant.Text" Size="Size.Small" OnClick="ClearFilters">Clear filters</MudButton>
+                    </div>
+                }
+            </NoRecordsContent>
             <PagerContent>
-                <MudTablePager />
+                <MudTablePager PageSizeOptions="PAGE_SIZES" />
             </PagerContent>
         </MudTable>
         </MudPaper>
@@ -142,84 +319,211 @@
 
         <MudTabPanel Text="@TabTitle("Size mappings", ChangedMappingCount)">
         <MudPaper Elevation="0" Class="spt-panel pa-4 mt-4">
-        <MudText Typo="Typo.h6">Size mappings</MudText>
-        <MudText Typo="Typo.body2" Class="mb-3" Style="opacity: .7">
-            General rule from config.json: every backpack with the original size on the left gets the new size, unless it has an override or is blacklisted.
+        <MudText Typo="Typo.body2" Class="spt-muted mb-3">
+            Each mapping resizes every backpack with that original size, except blacklisted backpacks and backpacks with an override.
+            Sizes are width x height in cells. Saved in config.json.
         </MudText>
 
+        <div class="jb-scroll">
         <MudSimpleTable Dense="true" Hover="true" Elevation="0">
             <thead>
                 <tr>
                     <th>Original</th>
                     <th>New size</th>
+                    <th>Change</th>
                     <th>Backpacks</th>
                     <th style="text-align: right">Actions</th>
                 </tr>
             </thead>
             <tbody>
-                @foreach (var (key, mapping) in CurrentMappings.OrderByDescending(m => m.Value.OldHorizontal * 100 + m.Value.OldVertical))
+                @if (MappingRows.Count == 0)
+                {
+                    <tr>
+                        <td colspan="5" class="spt-muted">No mappings yet: every backpack keeps its original size unless it has an override. Add one below.</td>
+                    </tr>
+                }
+                @foreach (var (key, draft, saved) in MappingRows)
                 {
                     var currentKey = key;
-                    <tr>
-                        <td>@FormatSize(mapping.OldHorizontal, mapping.OldVertical)</td>
+
+                    @* Mapeamento removido no rascunho: continua visível, riscado, até salvar ou restaurar *@
+                    if (draft is null)
+                    {
+                        <tr class="jb-row-removed">
+                            <td><span class="jb-num jb-strike">@FormatSize(saved!.OldHorizontal, saved.OldVertical)</span></td>
+                            <td><span class="jb-num jb-strike">@FormatSize(saved.NewHorizontal, saved.NewVertical)</span></td>
+                            <td colspan="2"><span class="jb-sub">Removed. After saving, these backpacks keep their original size.</span></td>
+                            <td style="text-align: right">
+                                <MudIconButton Icon="@Icons.Material.Filled.Undo" Size="Size.Small"
+                                               title="Restore mapping" aria-label="@($"Restore mapping for {key}")" OnClick="() => RestoreMapping(currentKey)" />
+                            </td>
+                        </tr>
+                        continue;
+                    }
+
+                    var users = MappingUsers(draft);
+                    var isNew = saved is null;
+                    var edited = saved is not null && (saved.NewHorizontal != draft.NewHorizontal || saved.NewVertical != draft.NewVertical);
+                    <tr class="@MappingRowClass(key, isNew || edited)">
                         <td>
-                            <div class="d-flex align-center" style="gap: 4px">
-                                <MudNumericField T="int" @bind-Value="mapping.NewHorizontal" Min="1" Max="MAX_CELLS" Margin="Margin.Dense"
-                                                 Variant="Variant.Outlined" Style="width: 72px" />
-                                <span>x</span>
-                                <MudNumericField T="int" @bind-Value="mapping.NewVertical" Min="1" Max="MAX_CELLS" Margin="Margin.Dense"
-                                                 Variant="Variant.Outlined" Style="width: 72px" />
+                            <span class="jb-num">@FormatSize(draft.OldHorizontal, draft.OldVertical)</span>
+                            @if (isNew)
+                            {
+                                <span class="jb-unsaved">new</span>
+                            }
+                            else if (edited)
+                            {
+                                <span class="jb-unsaved">unsaved</span>
+                            }
+                        </td>
+                        <td>
+                            <div class="jb-pair">
+                                <MudNumericField T="int" @bind-Value="draft.NewHorizontal" Min="1" Max="MAX_CELLS" Immediate="true" Margin="Margin.Dense"
+                                                 Variant="Variant.Outlined" aria-label="@($"New width for {key}")" title="@CELL_LIMIT_HINT" />
+                                <span class="jb-pair-x" aria-hidden="true">x</span>
+                                <MudNumericField T="int" @bind-Value="draft.NewVertical" Min="1" Max="MAX_CELLS" Immediate="true" Margin="Margin.Dense"
+                                                 Variant="Variant.Outlined" aria-label="@($"New height for {key}")" title="@CELL_LIMIT_HINT" />
+                            </div>
+                            @if (edited)
+                            {
+                                <div class="jb-sub jb-num mt-1">saved: @FormatSize(saved!.NewHorizontal, saved.NewVertical)</div>
+                            }
+                            @if (draft.NewHorizontal > MAX_SAFE_WIDTH)
+                            {
+                                <div class="mt-1">@WideWarning()</div>
+                            }
+                        </td>
+                        <td>
+                            <div class="jb-size">
+                                @Glyph(draft.OldHorizontal, draft.OldVertical, draft.NewHorizontal, draft.NewVertical)
+                                <span class="jb-sub jb-num">@CellDelta(draft.OldHorizontal, draft.OldVertical, draft.NewHorizontal, draft.NewVertical)</span>
                             </div>
                         </td>
-                        <td>@MappingUsage(mapping)</td>
-                        <td style="text-align: right">
-                            <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
-                                           title="Remove mapping" OnClick="() => RemoveMapping(currentKey)" />
+                        <td>
+                            @if (users.Count == 0)
+                            {
+                                <span class="jb-sub">none</span>
+                            }
+                            else
+                            {
+                                <MudButton Variant="Variant.Text" Size="Size.Small" Class="jb-count"
+                                           EndIcon="@(expandedKey == key ? Icons.Material.Filled.ExpandLess : Icons.Material.Filled.ExpandMore)"
+                                           aria-expanded="@(expandedKey == key ? "true" : "false")"
+                                           OnClick="() => ToggleExpanded(currentKey)">@Plural(users.Count, "backpack")</MudButton>
+                            }
+                        </td>
+                        <td style="text-align: right; white-space: nowrap">
+                            @if (edited)
+                            {
+                                <MudIconButton Icon="@Icons.Material.Filled.Undo" Size="Size.Small"
+                                               title="Undo changes to this mapping" aria-label="@($"Undo changes to mapping {key}")" OnClick="() => RestoreMapping(currentKey)" />
+                            }
+                            <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small"
+                                           title="Remove mapping" aria-label="@($"Remove mapping for {key}")" OnClick="() => RemoveMapping(currentKey)" />
                         </td>
                     </tr>
+                    @if (expandedKey == key && users.Count > 0)
+                    {
+                        <tr>
+                            <td colspan="5"><div class="jb-names">@string.Join(", ", users)</div></td>
+                        </tr>
+                    }
                 }
                 <tr>
                     <td>
-                        <div class="d-flex align-center" style="gap: 4px">
-                            <MudNumericField T="int" @bind-Value="newOldH" Min="1" Max="MAX_ORIGINAL_CELLS" Margin="Margin.Dense"
-                                             Variant="Variant.Outlined" Style="width: 72px" />
-                            <span>x</span>
-                            <MudNumericField T="int" @bind-Value="newOldV" Min="1" Max="MAX_ORIGINAL_CELLS" Margin="Margin.Dense"
-                                             Variant="Variant.Outlined" Style="width: 72px" />
+                        <div class="jb-pair">
+                            <MudNumericField T="int?" @ref="newOldHField" @bind-Value="newOldH" Min="1" Max="MAX_ORIGINAL_CELLS" Margin="Margin.Dense"
+                                             Variant="Variant.Outlined" Placeholder="W" aria-label="Original width" />
+                            <span class="jb-pair-x" aria-hidden="true">x</span>
+                            <MudNumericField T="int?" @bind-Value="newOldV" Min="1" Max="MAX_ORIGINAL_CELLS" Margin="Margin.Dense"
+                                             Variant="Variant.Outlined" Placeholder="H" aria-label="Original height" />
                         </div>
                     </td>
                     <td>
-                        <div class="d-flex align-center" style="gap: 4px">
-                            <MudNumericField T="int" @bind-Value="newNewH" Min="1" Max="MAX_CELLS" Margin="Margin.Dense"
-                                             Variant="Variant.Outlined" Style="width: 72px" />
-                            <span>x</span>
-                            <MudNumericField T="int" @bind-Value="newNewV" Min="1" Max="MAX_CELLS" Margin="Margin.Dense"
-                                             Variant="Variant.Outlined" Style="width: 72px" />
+                        <div class="jb-pair">
+                            <MudNumericField T="int?" @ref="newNewHField" @bind-Value="newNewH" Min="1" Max="MAX_CELLS" Margin="Margin.Dense"
+                                             Variant="Variant.Outlined" Placeholder="W" aria-label="New width" title="@CELL_LIMIT_HINT" />
+                            <span class="jb-pair-x" aria-hidden="true">x</span>
+                            <MudNumericField T="int?" @bind-Value="newNewV" Min="1" Max="MAX_CELLS" Margin="Margin.Dense"
+                                             Variant="Variant.Outlined" Placeholder="H" aria-label="New height" title="@CELL_LIMIT_HINT" />
                         </div>
                     </td>
-                    <td></td>
+                    <td colspan="2">
+                        @if (newNewH > MAX_SAFE_WIDTH)
+                        {
+                            @WideWarning()
+                        }
+                        else
+                        {
+                            <span class="jb-sub">New size: 1 to @MAX_CELLS cells per side.</span>
+                        }
+                    </td>
                     <td style="text-align: right">
-                        <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Add"
-                                   OnClick="AddMapping">Add</MudButton>
+                        <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Add" Class="jb-add"
+                                   Disabled="@(!CanAddMapping)" OnClick="AddMapping">Add</MudButton>
                     </td>
                 </tr>
             </tbody>
         </MudSimpleTable>
+        </div>
 
         @if (UnmappedSizes.Count > 0)
         {
-            <div class="d-flex align-center flex-wrap mt-3" style="gap: 8px">
-                <MudText Typo="Typo.body2">Sizes without mapping:</MudText>
-                @foreach (var (h, v) in UnmappedSizes)
+            <div class="d-flex align-center flex-wrap mt-4" style="gap: 8px">
+                <MudText Typo="Typo.body2">Original sizes with no mapping, pick one to start:</MudText>
+                @foreach (var (h, v, count) in UnmappedSizes)
                 {
-                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
-                             OnClick="() => PrefillMapping(h, v)">@FormatSize(h, v)</MudChip>
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Icon="@Icons.Material.Filled.Add"
+                             title="@($"Start a mapping for {FormatSize(h, v)}. New sizes go up to {MAX_CELLS} cells per side.")"
+                             OnClick="() => PrefillMapping(h, v)">
+                        <span class="jb-num">@FormatSize(h, v) (@Plural(count, "backpack"))</span>
+                    </MudChip>
                 }
             </div>
         }
         </MudPaper>
         </MudTabPanel>
     </MudTabs>
+
+    @* Região viva sempre presente, para o leitor de tela anunciar quando surgem mudanças pendentes *@
+    <div class="jb-sr" aria-live="polite">@(HasChanges ? $"Unsaved: {DraftSummary}" : string.Empty)</div>
+
+    @if (HasChanges)
+    {
+        <div class="jb-savebar spt-panel" role="region" aria-label="Unsaved changes">
+            <div class="jb-savebar-text">
+                <strong>@DraftSummary</strong>
+                @if (ShrinkCount > 0)
+                {
+                    <span class="jb-shrink">
+                        <MudIcon Icon="@Icons.Material.Filled.TrendingDown" Size="Size.Small" />
+                        @Plural(ShrinkCount, "backpack") will get smaller: items already stored in them may not fit.
+                    </span>
+                }
+                @if (NewlyWideCount > 0)
+                {
+                    <span class="jb-warn">
+                        <MudIcon Icon="@Icons.Material.Filled.WarningAmber" Size="Size.Small" />
+                        @Plural(NewlyWideCount, "backpack") will be wider than @MAX_SAFE_WIDTH cells and may display incorrectly in the game.
+                    </span>
+                }
+                <span class="jb-savebar-hint">Saving writes the config files and applies the sizes on the server. Restart the game client to see them.</span>
+            </div>
+            <MudButton Variant="Variant.Text" Color="Color.Default" OnClick="DiscardAsync" Disabled="saving">Discard</MudButton>
+            <MudButton Variant="Variant.Filled" Color="Color.Primary" OnClick="SaveAsync" Disabled="saving"
+                       StartIcon="@(saving ? null : Icons.Material.Filled.Save)">
+                @if (saving)
+                {
+                    <MudProgressCircular Indeterminate="true" Size="Size.Small" Class="mr-2" />
+                    <span>Saving</span>
+                }
+                else
+                {
+                    <span>Save</span>
+                }
+            </MudButton>
+        </div>
+    }
 </MudContainer>
 
 @code {
@@ -229,13 +533,28 @@
     // Tamanho original não é limitado pelo mesmo valor: há mochilas de outros mods com grids grandes (ex.: 6x50)
     private const int MAX_ORIGINAL_CELLS = 100;
 
+    // Acima desta largura a grid da mochila não cabe na tela de inventário do jogo e aparece deformada
+    private const int MAX_SAFE_WIDTH = 6;
+
+    // int.MaxValue aparece como "All" no pager do MudBlazor
+    private static readonly int[] PAGE_SIZES = [25, 50, 100, int.MaxValue];
+
+    // Lado máximo, em px, do desenho da grid
+    private const int GLYPH_BOX = 40;
+
+    // Dica dos campos de tamanho; o MudNumericField corta valores fora do limite
+    private static readonly string CELL_LIMIT_HINT = $"1 to {MAX_CELLS} cells per side";
+
     // Linha da tabela: entrada do resizer + nome localizado
     private sealed record Row(BackpackEntry Entry, string Name);
 
     private List<Row> rows = [];
     private string search = string.Empty;
     private BackpackSource? sourceFilter;
+    private bool unsavedOnly;
     private bool saving;
+    private string? savedNotice;
+    private string? saveError;
 
     // Cópias editáveis dos configs; o serviço só recebe ao salvar
     private ModConfig draftMappings = new();
@@ -245,17 +564,58 @@
     private string? editingId;
     private int editH;
     private int editV;
+    private MudNumericField<int>? editHField;
+    private bool focusEditField;
 
-    // Campos da linha de novo mapeamento
-    private int newOldH = 1;
-    private int newOldV = 1;
-    private int newNewH = 1;
-    private int newNewV = 1;
+    // Botões de editar por mochila, para devolver o foco à linha ao fechar a edição
+    private readonly Dictionary<string, MudIconButton> editButtons = [];
+    private string? focusReturnId;
+
+    // Campos da linha de novo mapeamento; nulos até o admin preencher
+    private int? newOldH;
+    private int? newOldV;
+    private int? newNewH;
+    private int? newNewV;
+    private MudNumericField<int?>? newOldHField;
+    private MudNumericField<int?>? newNewHField;
+    private MudNumericField<int?>? focusAddField;
+
+    // Mapeamento destacado (duplicado) e mapeamento com a lista de mochilas aberta
+    private string? flashKey;
+    private string? expandedKey;
 
     protected override void OnInitialized()
     {
         LoadRows();
         ResetDrafts();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // O campo só existe depois do render que abriu a edição
+        if (focusEditField && editHField is not null)
+        {
+            focusEditField = false;
+            await editHField.FocusAsync();
+        }
+
+        if (focusReturnId is not null)
+        {
+            string id = focusReturnId;
+            focusReturnId = null;
+
+            if (editButtons.TryGetValue(id, out var button))
+            {
+                await button.FocusAsync();
+            }
+        }
+
+        if (focusAddField is not null)
+        {
+            var field = focusAddField;
+            focusAddField = null;
+            await field.FocusAsync();
+        }
     }
 
     private void LoadRows()
@@ -277,6 +637,7 @@
         draftItems.Backpacks ??= [];
         draftBlacklist.Blacklist ??= [];
         editingId = null;
+        flashKey = null;
     }
 
     // Outros mods podem colorir nomes com rich text do Unity (<b>, <color=...>), que o HTML exibiria literalmente
@@ -296,7 +657,14 @@
 
     private bool FilterRow(Row row)
     {
-        if (sourceFilter is not null && Preview(row).Source != sourceFilter)
+        var preview = Preview(row);
+
+        if (sourceFilter is not null && preview.Source != sourceFilter)
+        {
+            return false;
+        }
+
+        if (unsavedOnly && !IsChanged(row, preview))
         {
             return false;
         }
@@ -310,11 +678,19 @@
             || row.Entry.ItemId.Contains(search, StringComparison.OrdinalIgnoreCase);
     }
 
+    private void ClearFilters()
+    {
+        search = string.Empty;
+        sourceFilter = null;
+        unsavedOnly = false;
+    }
+
     private static bool IsChanged(Row row, (int H, int V, BackpackSource Source) preview)
     {
         return preview.H != row.Entry.FinalH || preview.V != row.Entry.FinalV || preview.Source != row.Entry.Source;
     }
 
+    // Menor que o tamanho aplicado hoje: itens já guardados podem não caber
     private static bool IsShrink(Row row, (int H, int V, BackpackSource Source) preview)
     {
         return preview.H < row.Entry.FinalH || preview.V < row.Entry.FinalV;
@@ -327,21 +703,69 @@
 
     private int ChangedCount => rows.Count(row => IsChanged(row, Preview(row)));
 
+    private int ShrinkCount => rows.Count(row => IsShrink(row, Preview(row)));
+
+    // Mochilas que passam a ter mais de MAX_SAFE_WIDTH de largura com o rascunho (as que já eram largas não contam)
+    private int NewlyWideCount => rows.Count(row =>
+    {
+        var preview = Preview(row);
+        return preview.H > MAX_SAFE_WIDTH && preview.H != row.Entry.FinalH;
+    });
+
+    // Aviso de largura acima do que o inventário do jogo exibe bem; não bloqueia, o admin decide
+    private RenderFragment WideWarning() => __builder =>
+    {
+        <span class="jb-warn" title="@($"The game's inventory screen is laid out for backpacks up to {MAX_SAFE_WIDTH} cells wide; wider grids may appear stretched or overlap.")">
+            <MudIcon Icon="@Icons.Material.Filled.WarningAmber" Size="Size.Small" />Over @MAX_SAFE_WIDTH wide
+        </span>
+    };
+
     // Mapeamentos adicionados, removidos ou alterados em relação ao config salvo
     private int ChangedMappingCount
     {
         get
         {
-            var saved = ConfigService.SizeMappingConfig.SizeMappings != null
-                && ConfigService.SizeMappingConfig.SizeMappings.TryGetValue(BackpackResizer.BACKPACK_PARENT_ID, out var mappings)
-                    ? mappings
-                    : [];
+            var saved = SavedMappings;
             var draft = CurrentMappings;
 
             return saved.Keys.Union(draft.Keys).Count(key =>
                 !saved.TryGetValue(key, out var savedMapping)
                 || !draft.TryGetValue(key, out var draftMapping)
                 || Json.Serialize(savedMapping) != Json.Serialize(draftMapping));
+        }
+    }
+
+    private string SavedSummary
+    {
+        get
+        {
+            int resized = rows.Count(row => row.Entry.FinalH != row.Entry.OriginalH || row.Entry.FinalV != row.Entry.OriginalV);
+            return $"{Plural(rows.Count, "backpack")} on this server: {resized} resized, {rows.Count - resized} at their original size.";
+        }
+    }
+
+    // Resumo do rascunho para a barra de salvar; cobre o caso de mapeamento editado sem mochila afetada
+    private string DraftSummary
+    {
+        get
+        {
+            int backpacks = ChangedCount;
+            int mappings = ChangedMappingCount;
+            List<string> parts = [];
+
+            if (backpacks > 0)
+            {
+                parts.Add($"{Plural(backpacks, "backpack")} will change");
+            }
+
+            if (mappings > 0)
+            {
+                parts.Add(backpacks == 0
+                    ? $"{Plural(mappings, "mapping")} edited, no backpack affected"
+                    : $"{Plural(mappings, "mapping")} edited");
+            }
+
+            return parts.Count == 0 ? "Unsaved config edits" : string.Join(" · ", parts);
         }
     }
 
@@ -352,7 +776,46 @@
 
     private string RowClass(Row row, int index)
     {
-        return IsChanged(row, Preview(row)) ? "mud-theme-warning-text" : string.Empty;
+        return IsChanged(row, Preview(row)) ? "jb-row-changed" : string.Empty;
+    }
+
+    private SizeMapping? FindMapping(int h, int v)
+    {
+        return CurrentMappings.TryGetValue($"{h}x{v}", out var mapping) ? mapping : null;
+    }
+
+    // Explica o que a regra vencedora encobriu, para o admin entender o tamanho final
+    private string? RuleNote(Row row, (int H, int V, BackpackSource Source) preview)
+    {
+        var entry = row.Entry;
+        var mapping = FindMapping(entry.OriginalH, entry.OriginalV);
+
+        switch (preview.Source)
+        {
+            case BackpackSource.Blacklist:
+                // Mochila com várias grids já não seria alterada: a entrada na blacklist é redundante
+                if (entry.GridCount > 1)
+                {
+                    return $"Has {entry.GridCount} grids; the blacklist entry has no effect";
+                }
+
+                if (draftItems.Backpacks.TryGetValue(entry.ItemId, out var blocked))
+                {
+                    return $"Override {FormatSize(blocked.Horizontal, blocked.Vertical)} not applied";
+                }
+
+                return mapping != null
+                    ? $"Mapping to {FormatSize(mapping.NewHorizontal, mapping.NewVertical)} not applied"
+                    : $"Kept at {FormatSize(entry.OriginalH, entry.OriginalV)}";
+            case BackpackSource.MultipleGrids:
+                return $"{entry.GridCount} grids, can't be resized";
+            case BackpackSource.Override:
+                return mapping != null ? $"Replaces mapping to {FormatSize(mapping.NewHorizontal, mapping.NewVertical)}" : null;
+            case BackpackSource.NoMapping:
+                return $"No mapping for {FormatSize(entry.OriginalH, entry.OriginalV)}";
+            default:
+                return null;
+        }
     }
 
     private void StartEdit(Row row, (int H, int V, BackpackSource Source) preview)
@@ -360,21 +823,47 @@
         editingId = row.Entry.ItemId;
         editH = preview.H;
         editV = preview.V;
+        focusEditField = true;
     }
 
     private void CancelEdit()
     {
+        focusReturnId = editingId;
         editingId = null;
+    }
+
+    private void EditKeyDown(KeyboardEventArgs e, Row row)
+    {
+        if (e.Key == "Enter")
+        {
+            ConfirmOverride(row);
+        }
+        else if (e.Key == "Escape")
+        {
+            CancelEdit();
+        }
     }
 
     private void ConfirmOverride(Row row)
     {
-        draftItems.Backpacks[row.Entry.ItemId] = new GridSize
+        var entry = row.Entry;
+        int h = Math.Clamp(editH, 1, MAX_CELLS);
+        int v = Math.Clamp(editV, 1, MAX_CELLS);
+
+        // Override igual ao que as outras regras já dariam não tem efeito: remove em vez de gravar
+        var fallback = BackpackResizer.Resolve(entry.ItemId, entry.GridCount, entry.OriginalH, entry.OriginalV,
+            draftMappings, new ItemCustomConfig(), draftBlacklist);
+
+        if (fallback.H == h && fallback.V == v)
         {
-            ItemName = row.Name,
-            Horizontal = Math.Clamp(editH, 1, MAX_CELLS),
-            Vertical = Math.Clamp(editV, 1, MAX_CELLS),
-        };
+            draftItems.Backpacks.Remove(entry.ItemId);
+        }
+        else
+        {
+            draftItems.Backpacks[entry.ItemId] = new GridSize { ItemName = row.Name, Horizontal = h, Vertical = v };
+        }
+
+        focusReturnId = entry.ItemId;
         editingId = null;
     }
 
@@ -391,6 +880,57 @@
         }
     }
 
+    // Override ou blacklist desta mochila diferente do salvo (mudanças vindas de mapeamento não contam)
+    private bool RowDraftDiffers(Row row)
+    {
+        string id = row.Entry.ItemId;
+        bool savedBlacklisted = ConfigService.BlacklistConfig.Blacklist?.ContainsKey(id) == true;
+
+        if (savedBlacklisted != draftBlacklist.Blacklist.ContainsKey(id))
+        {
+            return true;
+        }
+
+        GridSize? saved = null;
+        ConfigService.ItemCustomConfig.Backpacks?.TryGetValue(id, out saved);
+        draftItems.Backpacks.TryGetValue(id, out var draft);
+
+        if (saved is null || draft is null)
+        {
+            return saved != draft;
+        }
+
+        return saved.Horizontal != draft.Horizontal || saved.Vertical != draft.Vertical;
+    }
+
+    private void UndoRow(Row row)
+    {
+        string id = row.Entry.ItemId;
+
+        if (ConfigService.BlacklistConfig.Blacklist?.TryGetValue(id, out var savedBlacklist) == true)
+        {
+            draftBlacklist.Blacklist[id] = new BlacklistItem { ItemName = savedBlacklist.ItemName };
+        }
+        else
+        {
+            draftBlacklist.Blacklist.Remove(id);
+        }
+
+        if (ConfigService.ItemCustomConfig.Backpacks?.TryGetValue(id, out var savedSize) == true)
+        {
+            draftItems.Backpacks[id] = new GridSize { ItemName = savedSize.ItemName, Horizontal = savedSize.Horizontal, Vertical = savedSize.Vertical };
+        }
+        else
+        {
+            draftItems.Backpacks.Remove(id);
+        }
+
+        if (editingId == id)
+        {
+            editingId = null;
+        }
+    }
+
     // Mapeamentos do Parent ID de mochilas no rascunho; vazio se o config.json não tiver nenhum
     private Dictionary<string, SizeMapping> CurrentMappings =>
         draftMappings.SizeMappings != null && draftMappings.SizeMappings.TryGetValue(BackpackResizer.BACKPACK_PARENT_ID, out var mappings)
@@ -398,41 +938,102 @@
             : [];
 
     // Tamanhos originais de mochilas que hoje caem em "No mapping", para sugerir novos mapeamentos
-    private List<(int H, int V)> UnmappedSizes => rows
+    private List<(int H, int V, int Count)> UnmappedSizes => rows
         .Where(row => Preview(row).Source == BackpackSource.NoMapping && row.Entry.OriginalH > 0 && row.Entry.OriginalV > 0)
-        .Select(row => (row.Entry.OriginalH, row.Entry.OriginalV))
-        .Distinct()
-        .OrderByDescending(size => size.Item1 * 100 + size.Item2)
+        .GroupBy(row => (row.Entry.OriginalH, row.Entry.OriginalV))
+        .Select(group => (group.Key.OriginalH, group.Key.OriginalV, group.Count()))
+        .OrderByDescending(size => size.OriginalH * 100 + size.OriginalV)
         .ToList();
 
-    private string MappingUsage(SizeMapping mapping)
+    // Nomes das mochilas que hoje recebem o tamanho deste mapeamento
+    private List<string> MappingUsers(SizeMapping mapping)
     {
-        int count = rows.Count(row =>
-            row.Entry.OriginalH == mapping.OldHorizontal
-            && row.Entry.OriginalV == mapping.OldVertical
-            && Preview(row).Source == BackpackSource.Mapping);
-
-        return count == 0 ? "-" : count.ToString();
+        return rows
+            .Where(row => row.Entry.OriginalH == mapping.OldHorizontal
+                && row.Entry.OriginalV == mapping.OldVertical
+                && Preview(row).Source == BackpackSource.Mapping)
+            .Select(row => row.Name)
+            .Order()
+            .ToList();
     }
+
+    private void ToggleExpanded(string key)
+    {
+        expandedKey = expandedKey == key ? null : key;
+    }
+
+    private bool CanAddMapping => newOldH is > 0 && newOldV is > 0 && newNewH is > 0 && newNewV is > 0;
 
     private void PrefillMapping(int h, int v)
     {
         newOldH = h;
         newOldV = v;
-        newNewH = h;
-        newNewV = v;
+        newNewH = null;
+        newNewV = null;
+        flashKey = null;
+        focusAddField = newNewHField;
     }
 
     private void AddMapping()
     {
+        if (!CanAddMapping)
+        {
+            return;
+        }
+
         string key = $"{newOldH}x{newOldV}";
 
         if (CurrentMappings.ContainsKey(key))
         {
-            Snackbar.Add($"A mapping for {key} already exists.", Severity.Warning);
+            flashKey = key;
+            Snackbar.Add($"A mapping for {key} already exists. Edit it in the list above.", Severity.Warning);
             return;
         }
 
+        EnsureDraftMappings()[key] = new SizeMapping
+        {
+            OldHorizontal = newOldH!.Value,
+            OldVertical = newOldV!.Value,
+            NewHorizontal = Math.Clamp(newNewH!.Value, 1, MAX_CELLS),
+            NewVertical = Math.Clamp(newNewV!.Value, 1, MAX_CELLS),
+        };
+
+        // Destaca o novo mapeamento, que entra na lista na posição do seu tamanho
+        newOldH = newOldV = newNewH = newNewV = null;
+        flashKey = key;
+        focusAddField = newOldHField;
+    }
+
+    private void RemoveMapping(string key)
+    {
+        CurrentMappings.Remove(key);
+
+        if (expandedKey == key)
+        {
+            expandedKey = null;
+        }
+    }
+
+    // Volta o mapeamento ao valor salvo; serve para desfazer edição e remoção
+    private void RestoreMapping(string key)
+    {
+        if (!SavedMappings.TryGetValue(key, out var saved))
+        {
+            return;
+        }
+
+        EnsureDraftMappings()[key] = new SizeMapping
+        {
+            OldHorizontal = saved.OldHorizontal,
+            OldVertical = saved.OldVertical,
+            NewHorizontal = saved.NewHorizontal,
+            NewVertical = saved.NewVertical,
+        };
+    }
+
+    // Dicionário de mapeamentos de mochilas no rascunho, criado se o config.json não tiver nenhum
+    private Dictionary<string, SizeMapping> EnsureDraftMappings()
+    {
         draftMappings.SizeMappings ??= [];
         if (!draftMappings.SizeMappings.TryGetValue(BackpackResizer.BACKPACK_PARENT_ID, out var mappings))
         {
@@ -440,50 +1041,174 @@
             draftMappings.SizeMappings[BackpackResizer.BACKPACK_PARENT_ID] = mappings;
         }
 
-        mappings[key] = new SizeMapping
+        return mappings;
+    }
+
+    // Mapeamentos do config salvo, para comparar com o rascunho
+    private Dictionary<string, SizeMapping> SavedMappings =>
+        ConfigService.SizeMappingConfig.SizeMappings != null
+        && ConfigService.SizeMappingConfig.SizeMappings.TryGetValue(BackpackResizer.BACKPACK_PARENT_ID, out var mappings)
+            ? mappings
+            : [];
+
+    // Mapeamentos do rascunho mais os removidos do salvo, ordenados pelo tamanho original
+    private List<(string Key, SizeMapping? Draft, SizeMapping? Saved)> MappingRows
+    {
+        get
         {
-            OldHorizontal = newOldH,
-            OldVertical = newOldV,
-            NewHorizontal = Math.Clamp(newNewH, 1, MAX_CELLS),
-            NewVertical = Math.Clamp(newNewV, 1, MAX_CELLS),
-        };
+            var draft = CurrentMappings;
+            var saved = SavedMappings;
+
+            return draft.Keys.Union(saved.Keys)
+                .Select(key => (key, draft.GetValueOrDefault(key), saved.GetValueOrDefault(key)))
+                .OrderByDescending(row =>
+                {
+                    var mapping = row.Item2 ?? row.Item3!;
+                    return mapping.OldHorizontal * 100 + mapping.OldVertical;
+                })
+                .ToList();
+        }
     }
 
-    private void RemoveMapping(string key)
+    private string? MappingRowClass(string key, bool changed)
     {
-        CurrentMappings.Remove(key);
+        if (flashKey == key)
+        {
+            return "jb-row-flash";
+        }
+
+        return changed ? "jb-row-changed" : null;
     }
 
-    private void Discard()
+    private async Task DiscardAsync()
     {
-        ResetDrafts();
+        bool? confirmed = await DialogService.ShowMessageBoxAsync(
+            "Discard changes?",
+            "All unsaved edits on both tabs will be lost.",
+            yesText: "Discard", cancelText: "Keep editing");
+
+        if (confirmed == true)
+        {
+            ResetDrafts();
+        }
+    }
+
+    private async Task ConfirmLeaveAsync(LocationChangingContext context)
+    {
+        if (!HasChanges || saving)
+        {
+            return;
+        }
+
+        bool? confirmed = await DialogService.ShowMessageBoxAsync(
+            "Leave without saving?",
+            "Your unsaved backpack changes will be lost.",
+            yesText: "Leave", cancelText: "Stay");
+
+        if (confirmed != true)
+        {
+            context.PreventNavigation();
+        }
     }
 
     private async Task SaveAsync()
     {
+        // Diminuir é a única mudança que pode sumir com itens dos jogadores: pede confirmação listando as mochilas
+        var shrinking = rows.Where(row => IsShrink(row, Preview(row))).ToList();
+        if (shrinking.Count > 0)
+        {
+            var items = string.Concat(shrinking.Take(8).Select(row =>
+            {
+                var preview = Preview(row);
+                return $"<li>{System.Net.WebUtility.HtmlEncode(row.Name)}: {FormatSize(row.Entry.FinalH, row.Entry.FinalV)} to {FormatSize(preview.H, preview.V)}</li>";
+            }));
+            var more = shrinking.Count > 8 ? $"<p>and {shrinking.Count - 8} more.</p>" : string.Empty;
+
+            bool? confirmed = await DialogService.ShowMessageBoxAsync(
+                "Make backpacks smaller?",
+                (MarkupString)$"<p>Items players already stored in these backpacks may not fit after the change.</p><ul>{items}</ul>{more}",
+                yesText: "Save anyway", cancelText: "Keep editing");
+
+            if (confirmed != true)
+            {
+                return;
+            }
+        }
+
         saving = true;
+        savedNotice = null;
+        saveError = null;
 
         try
         {
             if (!await ConfigService.SaveAsync(draftMappings, draftItems, draftBlacklist))
             {
-                Snackbar.Add("Could not save the config files. Check the server log.", Severity.Error);
+                saveError = $"Could not write the config files in {ConfigService.ConfigFolderPath}. Check that the folder exists and is writable; "
+                    + "the server log has the exact error. Your edits are still here, so you can save again.";
                 return;
             }
 
-            var result = Resizer.Apply();
+            Resizer.Apply();
             LoadRows();
             ResetDrafts();
-            Snackbar.Add($"Saved: {result.SuccessCount} backpacks modified, {result.SkippedCount} ignored.", Severity.Success);
+
+            int resized = rows.Count(row => row.Entry.FinalH != row.Entry.OriginalH || row.Entry.FinalV != row.Entry.OriginalV);
+            savedNotice = $"Saved. {Plural(resized, "backpack")} resized on the server. Restart the game client to see the new sizes.";
         }
         catch (Exception e)
         {
-            Snackbar.Add($"Error while saving: {e.Message}", Severity.Error);
+            saveError = $"Saving failed: {e.Message}. Your edits are still here; check the server log, then try again.";
         }
         finally
         {
             saving = false;
         }
+    }
+
+    // Desenho proporcional da grid final, com a área original sobreposta
+    private RenderFragment Glyph(int originalH, int originalV, int h, int v) => __builder =>
+    {
+        if (h <= 0 || v <= 0)
+        {
+            return;
+        }
+
+        int largest = Math.Max(Math.Max(h, v), Math.Max(originalH, originalV));
+        // Escala fracionária: grids longas (ex.: 6x50) encolhem até caber na caixa em vez de vazar
+        double cell = Math.Min(6.0, (double)GLYPH_BOX / Math.Max(largest, 1));
+        bool lost = originalH > h || originalV > v;
+
+        <span class="jb-grid-slot" aria-hidden="true">
+            <span class="jb-grid" style="@($"width:{Px(h * cell)};height:{Px(v * cell)}")">
+                <span class="jb-grid-orig" style="@($"width:{Px(Math.Min(originalH, h) * cell)};height:{Px(Math.Min(originalV, v) * cell)}")"></span>
+                @if (lost)
+                {
+                    <span class="jb-grid-lost" style="@($"width:{Px(originalH * cell)};height:{Px(originalV * cell)}")"></span>
+                }
+            </span>
+        </span>
+    };
+
+    // CSS exige ponto decimal; a cultura do servidor pode usar vírgula. Mínimo de 2px para a forma continuar visível
+    private static string Px(double value)
+    {
+        return Math.Max(value, 2).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) + "px";
+    }
+
+    private static string CellDelta(int originalH, int originalV, int h, int v)
+    {
+        int delta = h * v - originalH * originalV;
+        return delta switch
+        {
+            0 => "no change",
+            > 0 => $"+{delta} cells",
+            _ => $"−{-delta} cells",
+        };
+    }
+
+    private static string Plural(int count, string noun)
+    {
+        return count == 1 ? $"1 {noun}" : $"{count} {noun}s";
     }
 
     private static int SortSize((int H, int V, BackpackSource Source) size)
@@ -498,20 +1223,21 @@
 
     private static string SourceLabel(BackpackSource source) => source switch
     {
-        BackpackSource.Mapping => "Mapping",
+        BackpackSource.Mapping => "Size mapping",
         BackpackSource.Override => "Override",
         BackpackSource.Blacklist => "Blacklist",
         BackpackSource.MultipleGrids => "Multiple grids",
-        BackpackSource.NoMapping => "No mapping",
+        BackpackSource.NoMapping => "No rule",
         _ => source.ToString(),
     };
 
-    private static Color SourceColor(BackpackSource source) => source switch
+    // Ícone por regra, igual na legenda e nos chips; cor neutra para não sugerir regra "boa" ou "ruim"
+    private static string SourceIcon(BackpackSource source) => source switch
     {
-        BackpackSource.Mapping => Color.Success,
-        BackpackSource.Override => Color.Info,
-        BackpackSource.Blacklist => Color.Error,
-        BackpackSource.MultipleGrids => Color.Warning,
-        _ => Color.Default,
+        BackpackSource.Mapping => Icons.Material.Filled.SwapHoriz,
+        BackpackSource.Override => Icons.Material.Filled.PushPin,
+        BackpackSource.Blacklist => Icons.Material.Filled.Block,
+        BackpackSource.MultipleGrids => Icons.Material.Filled.ViewModule,
+        _ => Icons.Material.Filled.HorizontalRule,
     };
 }
