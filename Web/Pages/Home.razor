@@ -37,7 +37,10 @@
         </MudAlert>
     }
 
-    <MudPaper Elevation="0" Class="spt-panel pa-4 mt-4">
+    @* Abas compartilham o mesmo rascunho e a mesma barra de salvar *@
+    <MudTabs Elevation="0" Rounded="true" Class="mt-4">
+        <MudTabPanel Text="@TabTitle("Backpacks", ChangedCount)">
+        <MudPaper Elevation="0" Class="spt-panel pa-4 mt-4">
         <MudTable Items="@rows" Filter="FilterRow" Dense="true" Hover="true" Elevation="0"
                   SortLabel="Sort by" RowsPerPage="25" RowClassFunc="RowClass">
             <ToolBarContent>
@@ -134,9 +137,11 @@
                 <MudTablePager />
             </PagerContent>
         </MudTable>
-    </MudPaper>
+        </MudPaper>
+        </MudTabPanel>
 
-    <MudPaper Elevation="0" Class="spt-panel pa-4 mt-4">
+        <MudTabPanel Text="@TabTitle("Size mappings", ChangedMappingCount)">
+        <MudPaper Elevation="0" Class="spt-panel pa-4 mt-4">
         <MudText Typo="Typo.h6">Size mappings</MudText>
         <MudText Typo="Typo.body2" Class="mb-3" Style="opacity: .7">
             General rule from config.json: every backpack with the original size on the left gets the new size, unless it has an override or is blacklisted.
@@ -212,7 +217,9 @@
                 }
             </div>
         }
-    </MudPaper>
+        </MudPaper>
+        </MudTabPanel>
+    </MudTabs>
 </MudContainer>
 
 @code {
@@ -319,6 +326,29 @@
         || Json.Serialize(draftBlacklist) != Json.Serialize(ConfigService.BlacklistConfig);
 
     private int ChangedCount => rows.Count(row => IsChanged(row, Preview(row)));
+
+    // Mapeamentos adicionados, removidos ou alterados em relação ao config salvo
+    private int ChangedMappingCount
+    {
+        get
+        {
+            var saved = ConfigService.SizeMappingConfig.SizeMappings != null
+                && ConfigService.SizeMappingConfig.SizeMappings.TryGetValue(BackpackResizer.BACKPACK_PARENT_ID, out var mappings)
+                    ? mappings
+                    : [];
+            var draft = CurrentMappings;
+
+            return saved.Keys.Union(draft.Keys).Count(key =>
+                !saved.TryGetValue(key, out var savedMapping)
+                || !draft.TryGetValue(key, out var draftMapping)
+                || Json.Serialize(savedMapping) != Json.Serialize(draftMapping));
+        }
+    }
+
+    private static string TabTitle(string title, int changes)
+    {
+        return changes == 0 ? title : $"{title} ({changes})";
+    }
 
     private string RowClass(Row row, int index)
     {
