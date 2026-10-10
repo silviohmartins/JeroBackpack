@@ -73,8 +73,16 @@
         rows = Resizer.Entries
             .Select(entry => new Row(
                 entry,
-                localeDb.TryGetValue($"{entry.ItemId} Name", out var locale) ? locale : entry.ItemName ?? entry.ItemId))
+                StripRichText(localeDb.TryGetValue($"{entry.ItemId} Name", out var locale) ? locale : entry.ItemName ?? entry.ItemId)))
             .ToList();
+    }
+
+    // Outros mods podem colorir nomes com rich text do Unity (<b>, <color=...>), que o HTML exibiria literalmente
+    private static readonly Regex RICH_TEXT_TAG = new("<[^>]+>", RegexOptions.Compiled);
+
+    private static string StripRichText(string text)
+    {
+        return RICH_TEXT_TAG.Replace(text, string.Empty).Trim();
     }
 
     private bool FilterRow(Row row)
