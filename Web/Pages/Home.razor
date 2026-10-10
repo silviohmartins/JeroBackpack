@@ -3,7 +3,11 @@
 @layout BaseMudBlazorLayout
 @rendermode InteractiveServer
 @inject BackpackResizer Resizer
+@inject BackpackConfigService ConfigService
 @inject LocaleService LocaleService
+@inject JsonUtil Json
+@inject ICloner Cloner
+@inject ISnackbar Snackbar
 
 <PageTitle>JeroBackpack</PageTitle>
 
@@ -16,9 +20,26 @@
         </MudText>
     </MudPaper>
 
+    @if (HasChanges)
+    {
+        <MudAlert Severity="Severity.Warning" Variant="Variant.Outlined" Class="mt-4"
+                  ContentAlignment="HorizontalAlignment.Left">
+            <div class="d-flex align-center flex-wrap" style="gap: 12px">
+                <span>
+                    @ChangedCount backpack(s) with unsaved changes. Saving rewrites the config files and re-applies sizes on the server;
+                    restart the game client to see them.
+                </span>
+                <MudSpacer />
+                <MudButton Variant="Variant.Text" Color="Color.Default" OnClick="Discard" Disabled="saving">Discard</MudButton>
+                <MudButton Variant="Variant.Filled" Color="Color.Warning" OnClick="SaveAsync" Disabled="saving"
+                           StartIcon="@Icons.Material.Filled.Save">Save</MudButton>
+            </div>
+        </MudAlert>
+    }
+
     <MudPaper Elevation="0" Class="spt-panel pa-4 mt-4">
         <MudTable Items="@rows" Filter="FilterRow" Dense="true" Hover="true" Elevation="0"
-                  SortLabel="Sort by" RowsPerPage="25">
+                  SortLabel="Sort by" RowsPerPage="25" RowClassFunc="RowClass">
             <ToolBarContent>
                 <MudText Typo="Typo.h6">Backpacks</MudText>
                 <MudSpacer />
@@ -37,18 +58,76 @@
                 <MudTh><MudTableSortLabel T="Row" SortBy="r => r.Name" InitialDirection="SortDirection.Ascending">Name</MudTableSortLabel></MudTh>
                 <MudTh>ID</MudTh>
                 <MudTh><MudTableSortLabel T="Row" SortBy="r => r.Entry.OriginalH * 100 + r.Entry.OriginalV">Original</MudTableSortLabel></MudTh>
-                <MudTh><MudTableSortLabel T="Row" SortBy="r => r.Entry.FinalH * 100 + r.Entry.FinalV">Final</MudTableSortLabel></MudTh>
-                <MudTh><MudTableSortLabel T="Row" SortBy="r => r.Entry.Source">Source</MudTableSortLabel></MudTh>
+                <MudTh><MudTableSortLabel T="Row" SortBy="r => SortSize(Preview(r))">Final</MudTableSortLabel></MudTh>
+                <MudTh><MudTableSortLabel T="Row" SortBy="r => Preview(r).Source">Source</MudTableSortLabel></MudTh>
+                <MudTh Style="text-align: right">Actions</MudTh>
             </HeaderContent>
             <RowTemplate>
+                @{
+                    var preview = Preview(context);
+                    var changed = IsChanged(context, preview);
+                }
                 <MudTd DataLabel="Name">@context.Name</MudTd>
                 <MudTd DataLabel="ID"><code>@context.Entry.ItemId</code></MudTd>
                 <MudTd DataLabel="Original">@FormatSize(context.Entry.OriginalH, context.Entry.OriginalV)</MudTd>
-                <MudTd DataLabel="Final">@FormatSize(context.Entry.FinalH, context.Entry.FinalV)</MudTd>
+                <MudTd DataLabel="Final">
+                    @if (editingId == context.Entry.ItemId)
+                    {
+                        <div class="d-flex align-center" style="gap: 4px">
+                            <MudNumericField T="int" @bind-Value="editH" Min="1" Max="MAX_CELLS" Margin="Margin.Dense"
+                                             Variant="Variant.Outlined" Style="width: 72px" />
+                            <span>x</span>
+                            <MudNumericField T="int" @bind-Value="editV" Min="1" Max="MAX_CELLS" Margin="Margin.Dense"
+                                             Variant="Variant.Outlined" Style="width: 72px" />
+                            <MudIconButton Icon="@Icons.Material.Filled.Check" Size="Size.Small" Color="Color.Success"
+                                           title="Apply override" OnClick="() => ConfirmOverride(context)" />
+                            <MudIconButton Icon="@Icons.Material.Filled.Close" Size="Size.Small"
+                                           title="Cancel" OnClick="CancelEdit" />
+                        </div>
+                    }
+                    else
+                    {
+                        <span>@FormatSize(preview.H, preview.V)</span>
+                        @if (changed)
+                        {
+                            <MudText Typo="Typo.caption" Class="ml-1" Style="opacity: .6">
+                                (was @FormatSize(context.Entry.FinalH, context.Entry.FinalV))
+                            </MudText>
+                        }
+                        @if (IsShrink(context, preview))
+                        {
+                            <MudTooltip Text="Smaller than the current size: items already stored in this backpack may not fit.">
+                                <MudIcon Icon="@Icons.Material.Filled.Warning" Color="Color.Warning" Size="Size.Small" Class="ml-1" />
+                            </MudTooltip>
+                        }
+                    }
+                </MudTd>
                 <MudTd DataLabel="Source">
-                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@SourceColor(context.Entry.Source)">
-                        @SourceLabel(context.Entry.Source)
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined" Color="@SourceColor(preview.Source)">
+                        @SourceLabel(preview.Source)
                     </MudChip>
+                </MudTd>
+                <MudTd DataLabel="Actions" Style="text-align: right; white-space: nowrap">
+                    @if (preview.Source != BackpackSource.Blacklist && context.Entry.GridCount == 1)
+                    {
+                        <MudIconButton Icon="@Icons.Material.Filled.Edit" Size="Size.Small"
+                                       title="Set size override" OnClick="() => StartEdit(context, preview)" />
+                    }
+                    @if (draftItems.Backpacks.ContainsKey(context.Entry.ItemId))
+                    {
+                        <MudIconButton Icon="@Icons.Material.Filled.LayersClear" Size="Size.Small"
+                                       title="Remove size override" OnClick="() => RemoveOverride(context)" />
+                    }
+                    @if (preview.Source == BackpackSource.Blacklist)
+                    {
+                        <MudIconButton Icon="@Icons.Material.Filled.RemoveCircleOutline" Size="Size.Small" Color="Color.Success"
+                                       title="Remove from blacklist" OnClick="() => ToggleBlacklist(context)" />
+                    }
+                    else
+                    {
+                        <MudIconButton Icon="@Icons.Material.Filled.Block" Size="Size.Small" Color="Color.Error"
+                                       title="Add to blacklist" OnClick="() => ToggleBlacklist(context)" />
+                    }
                 </MudTd>
             </RowTemplate>
             <PagerContent>
@@ -59,14 +138,33 @@
 </MudContainer>
 
 @code {
+    // Limite de células para o override, evita valores absurdos digitados por engano
+    private const int MAX_CELLS = 30;
+
     // Linha da tabela: entrada do resizer + nome localizado
     private sealed record Row(BackpackEntry Entry, string Name);
 
     private List<Row> rows = [];
     private string search = string.Empty;
     private BackpackSource? sourceFilter;
+    private bool saving;
+
+    // Cópias editáveis dos configs; o serviço só recebe ao salvar
+    private ModConfig draftMappings = new();
+    private ItemCustomConfig draftItems = new();
+    private BlacklistConfig draftBlacklist = new();
+
+    private string? editingId;
+    private int editH;
+    private int editV;
 
     protected override void OnInitialized()
+    {
+        LoadRows();
+        ResetDrafts();
+    }
+
+    private void LoadRows()
     {
         var localeDb = LocaleService.GetLocaleDb();
 
@@ -77,6 +175,16 @@
             .ToList();
     }
 
+    private void ResetDrafts()
+    {
+        draftMappings = Cloner.Clone(ConfigService.SizeMappingConfig) ?? new ModConfig();
+        draftItems = Cloner.Clone(ConfigService.ItemCustomConfig) ?? new ItemCustomConfig();
+        draftBlacklist = Cloner.Clone(ConfigService.BlacklistConfig) ?? new BlacklistConfig();
+        draftItems.Backpacks ??= [];
+        draftBlacklist.Blacklist ??= [];
+        editingId = null;
+    }
+
     // Outros mods podem colorir nomes com rich text do Unity (<b>, <color=...>), que o HTML exibiria literalmente
     private static readonly Regex RICH_TEXT_TAG = new("<[^>]+>", RegexOptions.Compiled);
 
@@ -85,9 +193,16 @@
         return RICH_TEXT_TAG.Replace(text, string.Empty).Trim();
     }
 
+    private (int H, int V, BackpackSource Source) Preview(Row row)
+    {
+        var entry = row.Entry;
+        return BackpackResizer.Resolve(entry.ItemId, entry.GridCount, entry.OriginalH, entry.OriginalV,
+            draftMappings, draftItems, draftBlacklist);
+    }
+
     private bool FilterRow(Row row)
     {
-        if (sourceFilter is not null && row.Entry.Source != sourceFilter)
+        if (sourceFilter is not null && Preview(row).Source != sourceFilter)
         {
             return false;
         }
@@ -99,6 +214,101 @@
 
         return row.Name.Contains(search, StringComparison.OrdinalIgnoreCase)
             || row.Entry.ItemId.Contains(search, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsChanged(Row row, (int H, int V, BackpackSource Source) preview)
+    {
+        return preview.H != row.Entry.FinalH || preview.V != row.Entry.FinalV || preview.Source != row.Entry.Source;
+    }
+
+    private static bool IsShrink(Row row, (int H, int V, BackpackSource Source) preview)
+    {
+        return preview.H < row.Entry.FinalH || preview.V < row.Entry.FinalV;
+    }
+
+    private bool HasChanges =>
+        Json.Serialize(draftMappings) != Json.Serialize(ConfigService.SizeMappingConfig)
+        || Json.Serialize(draftItems) != Json.Serialize(ConfigService.ItemCustomConfig)
+        || Json.Serialize(draftBlacklist) != Json.Serialize(ConfigService.BlacklistConfig);
+
+    private int ChangedCount => rows.Count(row => IsChanged(row, Preview(row)));
+
+    private string RowClass(Row row, int index)
+    {
+        return IsChanged(row, Preview(row)) ? "mud-theme-warning-text" : string.Empty;
+    }
+
+    private void StartEdit(Row row, (int H, int V, BackpackSource Source) preview)
+    {
+        editingId = row.Entry.ItemId;
+        editH = preview.H;
+        editV = preview.V;
+    }
+
+    private void CancelEdit()
+    {
+        editingId = null;
+    }
+
+    private void ConfirmOverride(Row row)
+    {
+        draftItems.Backpacks[row.Entry.ItemId] = new GridSize
+        {
+            ItemName = row.Name,
+            Horizontal = Math.Clamp(editH, 1, MAX_CELLS),
+            Vertical = Math.Clamp(editV, 1, MAX_CELLS),
+        };
+        editingId = null;
+    }
+
+    private void RemoveOverride(Row row)
+    {
+        draftItems.Backpacks.Remove(row.Entry.ItemId);
+    }
+
+    private void ToggleBlacklist(Row row)
+    {
+        if (!draftBlacklist.Blacklist.Remove(row.Entry.ItemId))
+        {
+            draftBlacklist.Blacklist[row.Entry.ItemId] = new BlacklistItem { ItemName = row.Name };
+        }
+    }
+
+    private void Discard()
+    {
+        ResetDrafts();
+    }
+
+    private async Task SaveAsync()
+    {
+        saving = true;
+
+        try
+        {
+            if (!await ConfigService.SaveAsync(draftMappings, draftItems, draftBlacklist))
+            {
+                Snackbar.Add("Could not save the config files. Check the server log.", Severity.Error);
+                return;
+            }
+
+            var result = Resizer.Apply();
+            LoadRows();
+            ResetDrafts();
+            Snackbar.Add($"Saved: {result.SuccessCount} backpacks modified, {result.SkippedCount} ignored.", Severity.Success);
+        }
+        catch (Exception e)
+        {
+            Snackbar.Add($"Error while saving: {e.Message}", Severity.Error);
+        }
+        finally
+        {
+            saving = false;
+        }
+    }
+
+    private static int SortSize((int H, int V, BackpackSource Source) size)
+    {
+        return size.H * 100 + size.V;
     }
 
     private static string FormatSize(int h, int v)

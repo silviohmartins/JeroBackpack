@@ -1,6 +1,7 @@
 using SPTarkov.Common.Models.Logging;
 using SPTarkov.DI.Annotations;
 using SPTarkov.Server.Core.Helpers.Server;
+using SPTarkov.Server.Core.Utils;
 using System.Reflection;
 
 namespace JeroBackpack;
@@ -8,7 +9,8 @@ namespace JeroBackpack;
 [Injectable(InjectionType.Singleton)]
 public class BackpackConfigService(
     ISptLogger<BackpackConfigService> logger,
-    ModHelper modHelper
+    ModHelper modHelper,
+    JsonUtil jsonUtil
 )
 {
     public ModConfig SizeMappingConfig { get; private set; } = new();
@@ -67,5 +69,32 @@ public class BackpackConfigService(
             logger.Warning($"[JERO] JeroBackpack: ERROR loading blacklist.json. Details: {e.Message}");
             BlacklistConfig = new BlacklistConfig();
         }
+    }
+
+    /// <summary>
+    /// Grava os três configs em disco e passa a usá-los. Retorna false se algum arquivo não pôde ser gravado.
+    /// </summary>
+    public async Task<bool> SaveAsync(ModConfig sizeMappingConfig, ItemCustomConfig itemCustomConfig, BlacklistConfig blacklistConfig)
+    {
+        try
+        {
+            Directory.CreateDirectory(ConfigFolderPath);
+
+            await File.WriteAllTextAsync(Path.Combine(ConfigFolderPath, "config.json"), jsonUtil.Serialize(sizeMappingConfig, true));
+            await File.WriteAllTextAsync(Path.Combine(ConfigFolderPath, "item.json"), jsonUtil.Serialize(itemCustomConfig, true));
+            await File.WriteAllTextAsync(Path.Combine(ConfigFolderPath, "blacklist.json"), jsonUtil.Serialize(blacklistConfig, true));
+        }
+        catch (Exception e)
+        {
+            logger.Error($"[JERO] JeroBackpack: ERROR saving config files. Details: {e.Message}");
+            return false;
+        }
+
+        SizeMappingConfig = sizeMappingConfig;
+        ItemCustomConfig = itemCustomConfig;
+        BlacklistConfig = blacklistConfig;
+
+        logger.Success("[JERO] JeroBackpack: Config files saved from web page.");
+        return true;
     }
 }

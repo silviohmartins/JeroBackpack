@@ -16,7 +16,7 @@ public enum BackpackSource
     NoMapping,
 }
 
-public record BackpackEntry(string ItemId, string? ItemName, int OriginalH, int OriginalV, int FinalH, int FinalV, BackpackSource Source);
+public record BackpackEntry(string ItemId, string? ItemName, int GridCount, int OriginalH, int OriginalV, int FinalH, int FinalV, BackpackSource Source);
 
 [Injectable(InjectionType.Singleton)]
 public class BackpackResizer(
@@ -30,130 +30,144 @@ public class BackpackResizer(
     // Tamanho original de cada grid alterada, para permitir reverter e reaplicar
     private readonly Dictionary<string, (int H, int V)> _originalSizes = [];
 
-    private readonly List<BackpackEntry> _entries = [];
+    // Lista substituída a cada Apply, para a página nunca ler uma lista pela metade
+    private IReadOnlyList<BackpackEntry> _entries = [];
+
+    // A página web pode reaplicar enquanto outra aba também salva
+    private readonly Lock _sync = new();
 
     public ResizeResult LastResult { get; private set; } = new(0, 0);
     public IReadOnlyList<BackpackEntry> Entries => _entries;
 
-    public ResizeResult Apply()
+    /// <summary>
+    /// Decide o tamanho final de uma mochila. Usado tanto ao aplicar quanto na pré-visualização da página web.
+    /// </summary>
+    public static (int H, int V, BackpackSource Source) Resolve(
+        string itemId,
+        int gridCount,
+        int originalH,
+        int originalV,
+        ModConfig sizeMappingConfig,
+        ItemCustomConfig itemCustomConfig,
+        BlacklistConfig blacklistConfig
+    )
     {
-        // Sempre parte dos tamanhos originais, senão reaplicar aumentaria a grid de novo
-        Revert();
-        _entries.Clear();
-
-        var sizeMappingConfig = configService.SizeMappingConfig;
-        var itemCustomConfig = configService.ItemCustomConfig;
-        var blacklistConfig = configService.BlacklistConfig;
-
-        logger.Info("[JERO] JeroBackpack: Starting backpack resizing...");
-        int successCount = 0;
-        int skippedCount = 0;
-
-        // Verificar se há mapeamento de tamanhos para o Parent ID de backpack
-        if (sizeMappingConfig.SizeMappings == null || !sizeMappingConfig.SizeMappings.TryGetValue(BACKPACK_PARENT_ID, out var sizeMappings))
+        // Verificar se está na blacklist
+        if (blacklistConfig.Blacklist != null && blacklistConfig.Blacklist.ContainsKey(itemId))
         {
-            logger.Warning($"[JERO] JeroBackpack: No size mappings found for Parent ID {BACKPACK_PARENT_ID} in config.json.");
-            LastResult = new ResizeResult(0, 0);
-            return LastResult;
+            return (originalH, originalV, BackpackSource.Blacklist);
         }
 
-        // Iterar sobre todos os itens no banco de dados
-        foreach (var itemEntry in templateTable.Items)
+        // Múltiplos grids não são suportados
+        if (gridCount > 1)
         {
-            var item = itemEntry.Value;
-            string itemId = itemEntry.Key;
+            return (originalH, originalV, BackpackSource.MultipleGrids);
+        }
 
-            // Verificar se é uma mochila (Parent ID = BACKPACK_PARENT_ID)
-            if (item.Parent != BACKPACK_PARENT_ID)
+        // item.json vence config.json
+        if (itemCustomConfig.Backpacks != null && itemCustomConfig.Backpacks.TryGetValue(itemId, out var customSize))
+        {
+            return (customSize.Horizontal, customSize.Vertical, BackpackSource.Override);
+        }
+
+        // Usar mapeamento de tamanhos baseado no tamanho antigo
+        if (sizeMappingConfig.SizeMappings != null
+            && sizeMappingConfig.SizeMappings.TryGetValue(BACKPACK_PARENT_ID, out var sizeMappings)
+            && sizeMappings.TryGetValue($"{originalH}x{originalV}", out var sizeMapping))
+        {
+            return (sizeMapping.NewHorizontal, sizeMapping.NewVertical, BackpackSource.Mapping);
+        }
+
+        return (originalH, originalV, BackpackSource.NoMapping);
+    }
+
+    public ResizeResult Apply()
+    {
+        lock (_sync)
+        {
+            // Sempre parte dos tamanhos originais, senão reaplicar aumentaria a grid de novo
+            RevertUnlocked();
+            List<BackpackEntry> entries = [];
+
+            var sizeMappingConfig = configService.SizeMappingConfig;
+            var itemCustomConfig = configService.ItemCustomConfig;
+            var blacklistConfig = configService.BlacklistConfig;
+
+            logger.Info("[JERO] JeroBackpack: Starting backpack resizing...");
+            int successCount = 0;
+            int skippedCount = 0;
+
+            // Sem mapeamento ainda aplicamos os overrides do item.json
+            if (sizeMappingConfig.SizeMappings == null || !sizeMappingConfig.SizeMappings.ContainsKey(BACKPACK_PARENT_ID))
             {
-                continue;
+                logger.Warning($"[JERO] JeroBackpack: No size mappings found for Parent ID {BACKPACK_PARENT_ID} in config.json.");
             }
 
-            // Verificar se está na blacklist
-            if (blacklistConfig.Blacklist != null && blacklistConfig.Blacklist.ContainsKey(itemId))
+            // Iterar sobre todos os itens no banco de dados
+            foreach (var itemEntry in templateTable.Items)
             {
-                var blacklistedGrid = item.Properties?.Grids?.FirstOrDefault()?.Properties;
-                int h = blacklistedGrid?.CellsH ?? 0;
-                int v = blacklistedGrid?.CellsV ?? 0;
-                _entries.Add(new BackpackEntry(itemId, item.Name, h, v, h, v, BackpackSource.Blacklist));
-                skippedCount++;
-                continue;
-            }
+                var item = itemEntry.Value;
+                string itemId = itemEntry.Key;
 
-            // Verificar se tem múltiplos grids (não suportado)
-            var grids = item.Properties?.Grids;
-            if (grids == null)
-            {
-                continue;
-            }
-
-            var gridCount = grids.Count();
-            if (gridCount == 0)
-            {
-                continue;
-            }
-
-            if (gridCount > 1)
-            {
-                _entries.Add(new BackpackEntry(itemId, item.Name, 0, 0, 0, 0, BackpackSource.MultipleGrids));
-                skippedCount++;
-                continue;
-            }
-
-            var mainGrid = grids.FirstOrDefault();
-            if (mainGrid?.Properties == null)
-            {
-                continue;
-            }
-
-            int oldH = mainGrid.Properties.CellsH ?? 0;
-            int oldV = mainGrid.Properties.CellsV ?? 0;
-
-            if (oldH == 0 || oldV == 0)
-            {
-                continue;
-            }
-
-            int newH;
-            int newV;
-            BackpackSource source;
-
-            // Verificar se tem customização específica no item.json
-            if (itemCustomConfig.Backpacks != null && itemCustomConfig.Backpacks.TryGetValue(itemId, out var customSize))
-            {
-                newH = customSize.Horizontal;
-                newV = customSize.Vertical;
-                source = BackpackSource.Override;
-            }
-            else
-            {
-                // Usar mapeamento de tamanhos baseado no tamanho antigo
-                string sizeKey = $"{oldH}x{oldV}";
-                if (!sizeMappings.TryGetValue(sizeKey, out var sizeMapping))
+                // Verificar se é uma mochila (Parent ID = BACKPACK_PARENT_ID)
+                if (item.Parent != BACKPACK_PARENT_ID)
                 {
-                    logger.Debug($"[JERO] JeroBackpack: No mapping found for size {sizeKey} of backpack '{item.Name}' (ID: {itemId}).");
-                    _entries.Add(new BackpackEntry(itemId, item.Name, oldH, oldV, oldH, oldV, BackpackSource.NoMapping));
                     continue;
                 }
 
-                newH = sizeMapping.NewHorizontal;
-                newV = sizeMapping.NewVertical;
-                source = BackpackSource.Mapping;
+                var grids = item.Properties?.Grids?.ToList() ?? [];
+                var mainGrid = grids.FirstOrDefault()?.Properties;
+                int gridCount = grids.Count;
+                int oldH = gridCount == 1 ? mainGrid?.CellsH ?? 0 : 0;
+                int oldV = gridCount == 1 ? mainGrid?.CellsV ?? 0 : 0;
+
+                var (newH, newV, source) = Resolve(itemId, gridCount, oldH, oldV, sizeMappingConfig, itemCustomConfig, blacklistConfig);
+
+                switch (source)
+                {
+                    case BackpackSource.Blacklist:
+                    case BackpackSource.MultipleGrids:
+                        entries.Add(new BackpackEntry(itemId, item.Name, gridCount, oldH, oldV, oldH, oldV, source));
+                        skippedCount++;
+                        continue;
+                }
+
+                // Sem grid ou grid com tamanho 0: ignorar
+                if (gridCount == 0 || mainGrid == null || oldH == 0 || oldV == 0)
+                {
+                    continue;
+                }
+
+                if (source == BackpackSource.NoMapping)
+                {
+                    logger.Debug($"[JERO] JeroBackpack: No mapping found for size {oldH}x{oldV} of backpack '{item.Name}' (ID: {itemId}).");
+                    entries.Add(new BackpackEntry(itemId, item.Name, gridCount, oldH, oldV, oldH, oldV, source));
+                    continue;
+                }
+
+                _originalSizes[itemId] = (oldH, oldV);
+                mainGrid.CellsH = newH;
+                mainGrid.CellsV = newV;
+                entries.Add(new BackpackEntry(itemId, item.Name, gridCount, oldH, oldV, newH, newV, source));
+                successCount++;
             }
 
-            _originalSizes[itemId] = (oldH, oldV);
-            mainGrid.Properties.CellsH = newH;
-            mainGrid.Properties.CellsV = newV;
-            _entries.Add(new BackpackEntry(itemId, item.Name, oldH, oldV, newH, newV, source));
-            successCount++;
+            logger.Success($"[JERO] JeroBackpack: Completed! {successCount} backpacks modified, {skippedCount} backpacks ignored (blacklist or multiple grids).");
+            _entries = entries;
+            LastResult = new ResizeResult(successCount, skippedCount);
+            return LastResult;
         }
-
-        logger.Success($"[JERO] JeroBackpack: Completed! {successCount} backpacks modified, {skippedCount} backpacks ignored (blacklist or multiple grids).");
-        LastResult = new ResizeResult(successCount, skippedCount);
-        return LastResult;
     }
 
     public void Revert()
+    {
+        lock (_sync)
+        {
+            RevertUnlocked();
+        }
+    }
+
+    private void RevertUnlocked()
     {
         foreach (var (itemId, (h, v)) in _originalSizes)
         {
