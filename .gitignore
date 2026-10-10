@@ -41,6 +41,10 @@ CLAUDE.md
 CLAUDE.local.md
 .claude/
 
+# Impeccable
+.impeccable
+PRODUCT.md
+
 # NuGet Packages
 *.nupkg
 *.nuget.props
