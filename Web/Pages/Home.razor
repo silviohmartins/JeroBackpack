@@ -135,11 +135,92 @@
             </PagerContent>
         </MudTable>
     </MudPaper>
+
+    <MudPaper Elevation="0" Class="spt-panel pa-4 mt-4">
+        <MudText Typo="Typo.h6">Size mappings</MudText>
+        <MudText Typo="Typo.body2" Class="mb-3" Style="opacity: .7">
+            General rule from config.json: every backpack with the original size on the left gets the new size, unless it has an override or is blacklisted.
+        </MudText>
+
+        <MudSimpleTable Dense="true" Hover="true" Elevation="0">
+            <thead>
+                <tr>
+                    <th>Original</th>
+                    <th>New size</th>
+                    <th>Backpacks</th>
+                    <th style="text-align: right">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var (key, mapping) in CurrentMappings.OrderByDescending(m => m.Value.OldHorizontal * 100 + m.Value.OldVertical))
+                {
+                    var currentKey = key;
+                    <tr>
+                        <td>@FormatSize(mapping.OldHorizontal, mapping.OldVertical)</td>
+                        <td>
+                            <div class="d-flex align-center" style="gap: 4px">
+                                <MudNumericField T="int" @bind-Value="mapping.NewHorizontal" Min="1" Max="MAX_CELLS" Margin="Margin.Dense"
+                                                 Variant="Variant.Outlined" Style="width: 72px" />
+                                <span>x</span>
+                                <MudNumericField T="int" @bind-Value="mapping.NewVertical" Min="1" Max="MAX_CELLS" Margin="Margin.Dense"
+                                                 Variant="Variant.Outlined" Style="width: 72px" />
+                            </div>
+                        </td>
+                        <td>@MappingUsage(mapping)</td>
+                        <td style="text-align: right">
+                            <MudIconButton Icon="@Icons.Material.Filled.Delete" Size="Size.Small" Color="Color.Error"
+                                           title="Remove mapping" OnClick="() => RemoveMapping(currentKey)" />
+                        </td>
+                    </tr>
+                }
+                <tr>
+                    <td>
+                        <div class="d-flex align-center" style="gap: 4px">
+                            <MudNumericField T="int" @bind-Value="newOldH" Min="1" Max="MAX_ORIGINAL_CELLS" Margin="Margin.Dense"
+                                             Variant="Variant.Outlined" Style="width: 72px" />
+                            <span>x</span>
+                            <MudNumericField T="int" @bind-Value="newOldV" Min="1" Max="MAX_ORIGINAL_CELLS" Margin="Margin.Dense"
+                                             Variant="Variant.Outlined" Style="width: 72px" />
+                        </div>
+                    </td>
+                    <td>
+                        <div class="d-flex align-center" style="gap: 4px">
+                            <MudNumericField T="int" @bind-Value="newNewH" Min="1" Max="MAX_CELLS" Margin="Margin.Dense"
+                                             Variant="Variant.Outlined" Style="width: 72px" />
+                            <span>x</span>
+                            <MudNumericField T="int" @bind-Value="newNewV" Min="1" Max="MAX_CELLS" Margin="Margin.Dense"
+                                             Variant="Variant.Outlined" Style="width: 72px" />
+                        </div>
+                    </td>
+                    <td></td>
+                    <td style="text-align: right">
+                        <MudButton Variant="Variant.Outlined" Size="Size.Small" StartIcon="@Icons.Material.Filled.Add"
+                                   OnClick="AddMapping">Add</MudButton>
+                    </td>
+                </tr>
+            </tbody>
+        </MudSimpleTable>
+
+        @if (UnmappedSizes.Count > 0)
+        {
+            <div class="d-flex align-center flex-wrap mt-3" style="gap: 8px">
+                <MudText Typo="Typo.body2">Sizes without mapping:</MudText>
+                @foreach (var (h, v) in UnmappedSizes)
+                {
+                    <MudChip T="string" Size="Size.Small" Variant="Variant.Outlined"
+                             OnClick="() => PrefillMapping(h, v)">@FormatSize(h, v)</MudChip>
+                }
+            </div>
+        }
+    </MudPaper>
 </MudContainer>
 
 @code {
     // Limite de células para o override, evita valores absurdos digitados por engano
     private const int MAX_CELLS = 30;
+
+    // Tamanho original não é limitado pelo mesmo valor: há mochilas de outros mods com grids grandes (ex.: 6x50)
+    private const int MAX_ORIGINAL_CELLS = 100;
 
     // Linha da tabela: entrada do resizer + nome localizado
     private sealed record Row(BackpackEntry Entry, string Name);
@@ -157,6 +238,12 @@
     private string? editingId;
     private int editH;
     private int editV;
+
+    // Campos da linha de novo mapeamento
+    private int newOldH = 1;
+    private int newOldV = 1;
+    private int newNewH = 1;
+    private int newNewV = 1;
 
     protected override void OnInitialized()
     {
@@ -272,6 +359,69 @@
         {
             draftBlacklist.Blacklist[row.Entry.ItemId] = new BlacklistItem { ItemName = row.Name };
         }
+    }
+
+    // Mapeamentos do Parent ID de mochilas no rascunho; vazio se o config.json não tiver nenhum
+    private Dictionary<string, SizeMapping> CurrentMappings =>
+        draftMappings.SizeMappings != null && draftMappings.SizeMappings.TryGetValue(BackpackResizer.BACKPACK_PARENT_ID, out var mappings)
+            ? mappings
+            : [];
+
+    // Tamanhos originais de mochilas que hoje caem em "No mapping", para sugerir novos mapeamentos
+    private List<(int H, int V)> UnmappedSizes => rows
+        .Where(row => Preview(row).Source == BackpackSource.NoMapping && row.Entry.OriginalH > 0 && row.Entry.OriginalV > 0)
+        .Select(row => (row.Entry.OriginalH, row.Entry.OriginalV))
+        .Distinct()
+        .OrderByDescending(size => size.Item1 * 100 + size.Item2)
+        .ToList();
+
+    private string MappingUsage(SizeMapping mapping)
+    {
+        int count = rows.Count(row =>
+            row.Entry.OriginalH == mapping.OldHorizontal
+            && row.Entry.OriginalV == mapping.OldVertical
+            && Preview(row).Source == BackpackSource.Mapping);
+
+        return count == 0 ? "-" : count.ToString();
+    }
+
+    private void PrefillMapping(int h, int v)
+    {
+        newOldH = h;
+        newOldV = v;
+        newNewH = h;
+        newNewV = v;
+    }
+
+    private void AddMapping()
+    {
+        string key = $"{newOldH}x{newOldV}";
+
+        if (CurrentMappings.ContainsKey(key))
+        {
+            Snackbar.Add($"A mapping for {key} already exists.", Severity.Warning);
+            return;
+        }
+
+        draftMappings.SizeMappings ??= [];
+        if (!draftMappings.SizeMappings.TryGetValue(BackpackResizer.BACKPACK_PARENT_ID, out var mappings))
+        {
+            mappings = [];
+            draftMappings.SizeMappings[BackpackResizer.BACKPACK_PARENT_ID] = mappings;
+        }
+
+        mappings[key] = new SizeMapping
+        {
+            OldHorizontal = newOldH,
+            OldVertical = newOldV,
+            NewHorizontal = Math.Clamp(newNewH, 1, MAX_CELLS),
+            NewVertical = Math.Clamp(newNewV, 1, MAX_CELLS),
+        };
+    }
+
+    private void RemoveMapping(string key)
+    {
+        CurrentMappings.Remove(key);
     }
 
     private void Discard()
